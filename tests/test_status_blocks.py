@@ -1,6 +1,21 @@
 import struct
 
-from ogma_app.status_blocks import CROI_STATUS, FOINSE_STATUS, LAMH_SERVO_DEBUG, PLEASC_STATUS, TEACHTAIRE_STATUS
+import pytest
+
+from ogma_app.status_blocks import (
+    CROI_STATUS,
+    FOINSE_STATUS,
+    LAMH_SERVO_DEBUG,
+    PLEASC_STATUS,
+    TEACHTAIRE_STATUS,
+    BinaryField,
+    StatusBlock,
+)
+
+
+def test_status_block_rejects_fields_beyond_declared_size() -> None:
+    with pytest.raises(ValueError, match="smaller than field extent"):
+        StatusBlock("bad", 0, 4, (BinaryField("value", 4, "I"),))
 
 
 def test_teachtaire_status_parse_minimal() -> None:
@@ -143,6 +158,16 @@ def test_croi_status_parse_logger_startup_extension() -> None:
     parsed = CROI_STATUS.parse(bytes(data))
 
     assert parsed["logger_startup_samples_skipped"] == 7
+
+
+def test_croi_status_parse_main_fallback_extension() -> None:
+    data = bytearray(CROI_STATUS.size)
+    struct.pack_into("<I", data, 0, CROI_STATUS.magic)
+    struct.pack_into("<I", data, 4, 11)
+    struct.pack_into("<I", data, 316, 1)
+    parsed = CROI_STATUS.parse(bytes(data))
+
+    assert parsed["main_fallback_triggered"] == 1
 
 
 def test_croi_status_parse_minimal() -> None:

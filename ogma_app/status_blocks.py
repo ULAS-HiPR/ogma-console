@@ -40,6 +40,16 @@ class StatusBlock:
     size: int
     fields: tuple[BinaryField, ...]
 
+    def __post_init__(self) -> None:
+        required_size = max(
+            (field.offset + struct.calcsize("<" + field.fmt) for field in self.fields),
+            default=0,
+        )
+        if self.size < required_size:
+            raise ValueError(
+                f"{self.symbol} size {self.size} is smaller than field extent {required_size}"
+            )
+
     def parse(self, data: bytes) -> dict[str, Any]:
         if len(data) < self.size:
             raise ValueError(f"status block too short: {len(data)} < {self.size}")
@@ -294,7 +304,7 @@ CROI_MISSION_CONFIG_STATUS = {
 CROI_STATUS = StatusBlock(
     symbol="croi_status",
     magic=0x43524F49,
-    size=316,
+    size=320,
     fields=(
         BinaryField("magic", 0, "I"),
         BinaryField("version", 4, "I"),
