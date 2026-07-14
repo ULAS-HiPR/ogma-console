@@ -9,7 +9,7 @@ def test_croi_verification_reports_each_readback_field() -> None:
         config,
         {
             "mission_config_magic": 0x4F474D43,
-            "mission_config_schema_version": 5,
+            "mission_config_schema_version": 6,
             "mission_config_crc32": config.crc32(),
         },
     )

@@ -12,7 +12,7 @@ from .mission_config import LoggingPolicy, MissionConfig, RecoveryFallbackConfig
 
 
 FLIGHT_MANIFEST_FORMAT = "ogma-flight-manifest"
-FLIGHT_MANIFEST_SCHEMA_VERSION = 1
+FLIGHT_MANIFEST_SCHEMA_VERSION = 2
 KNOWN_FLIGHT_BOARDS = frozenset(("croi", "teachtaire", "lamh", "foinse", "pleasc"))
 
 
@@ -78,11 +78,17 @@ class FlightManifest:
     def from_dict(cls, values: dict[str, Any]) -> "FlightManifest":
         mission = MissionConfig.from_dict(_required_dict(values, "mission"))
         lamh_values = _required_dict(values, "lamh_safety")
+        schema_version = int(values.get("schema_version", 0))
+        logging_values = dict(_required_dict(values, "logging"))
+        if schema_version == 1:
+            logging_values["mode"] = "flight_window"
+            logging_values.setdefault("minimum_flight_ms", 1_200_000)
+            schema_version = FLIGHT_MANIFEST_SCHEMA_VERSION
         manifest = cls(
             mission=mission,
             lamh_safety=LamhSafetyConfig.from_values(lamh_values.get("angles_deg", ())),
             recovery=RecoveryFallbackConfig(**_required_dict(values, "recovery")),
-            logging=LoggingPolicy(**_required_dict(values, "logging")),
+            logging=LoggingPolicy(**logging_values),
             radio=RadioPolicy(**_required_dict(values, "radio")),
             preflight=PreflightPolicy(
                 **{
@@ -90,7 +96,7 @@ class FlightManifest:
                     "required_boards": tuple(_required_dict(values, "preflight").get("required_boards", ())),
                 }
             ),
-            schema_version=int(values.get("schema_version", 0)),
+            schema_version=schema_version,
         )
         manifest.validate()
         return manifest
@@ -161,14 +167,17 @@ def load_flight_manifest(path: Path, lamh_safety: LamhSafetyConfig | None = None
             mission=load_mission_json(path),
             lamh_safety=lamh_safety or LamhSafetyConfig.defaults(),
         )
-    if int(payload.get("schema_version", 0)) != FLIGHT_MANIFEST_SCHEMA_VERSION:
+    file_schema = int(payload.get("schema_version", 0))
+    if file_schema not in (1, FLIGHT_MANIFEST_SCHEMA_VERSION):
         raise ValueError("unsupported flight manifest file schema")
     values = payload.get("manifest")
     if not isinstance(values, dict):
         raise ValueError("flight manifest file has no manifest object")
-    manifest = FlightManifest.from_dict(values)
-    if str(payload.get("manifest_sha256", "")) != manifest.sha256():
+    recorded_digest = str(payload.get("manifest_sha256", ""))
+    source_digest = hashlib.sha256(_canonical_json(values)).hexdigest()
+    if recorded_digest != source_digest:
         raise ValueError("flight manifest SHA-256 mismatch")
+    manifest = FlightManifest.from_dict(values)
     return manifest
 
 

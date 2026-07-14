@@ -170,6 +170,18 @@ def test_croi_status_parse_main_fallback_extension() -> None:
     assert parsed["main_fallback_triggered"] == 1
 
 
+def test_croi_status_parse_logger_capacity_extension() -> None:
+    data = bytearray(CROI_STATUS.size)
+    struct.pack_into("<I", data, 0, CROI_STATUS.magic)
+    struct.pack_into("<I", data, 4, 12)
+    struct.pack_into("<I", data, 320, 5_000_000)
+    struct.pack_into("<I", data, 324, 2_570_400)
+    parsed = CROI_STATUS.parse(bytes(data))
+
+    assert parsed["logger_free_bytes"] == 5_000_000
+    assert parsed["logger_required_bytes"] == 2_570_400
+
+
 def test_croi_status_parse_minimal() -> None:
     data = bytearray(CROI_STATUS.size)
     struct.pack_into("<I", data, 0, CROI_STATUS.magic)

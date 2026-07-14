@@ -1211,7 +1211,17 @@ class OgmaApp(tk.Tk):
         )
         sample_period.grid(row=0, column=1, sticky="ew", padx=8, pady=6)
         ttk.Label(fields, text="ms", style="Muted.TLabel").grid(row=0, column=2, sticky="w", padx=(0, 8), pady=6)
-        ttk.Label(fields, text="Post-Landing Duration").grid(row=1, column=0, sticky="w", padx=8, pady=6)
+        ttk.Label(fields, text="Guaranteed Flight Logging").grid(row=1, column=0, sticky="w", padx=8, pady=6)
+        minimum_flight = ttk.Spinbox(
+            fields,
+            from_=1,
+            to=120,
+            increment=1,
+            textvariable=self.logging_minimum_flight_minutes,
+        )
+        minimum_flight.grid(row=1, column=1, sticky="ew", padx=8, pady=6)
+        ttk.Label(fields, text="min", style="Muted.TLabel").grid(row=1, column=2, sticky="w", padx=(0, 8), pady=6)
+        ttk.Label(fields, text="Post-Landing Duration").grid(row=2, column=0, sticky="w", padx=8, pady=6)
         post_landing = ttk.Spinbox(
             fields,
             from_=0,
@@ -1219,14 +1229,14 @@ class OgmaApp(tk.Tk):
             increment=1000,
             textvariable=self.logging_post_landing,
         )
-        post_landing.grid(row=1, column=1, sticky="ew", padx=8, pady=6)
-        ttk.Label(fields, text="ms", style="Muted.TLabel").grid(row=1, column=2, sticky="w", padx=(0, 8), pady=6)
+        post_landing.grid(row=2, column=1, sticky="ew", padx=8, pady=6)
+        ttk.Label(fields, text="ms", style="Muted.TLabel").grid(row=2, column=2, sticky="w", padx=(0, 8), pady=6)
         remote_can = ttk.Checkbutton(
             fields,
             text="Store remote CAN events",
             variable=self.logging_include_remote_can,
         )
-        remote_can.grid(row=2, column=0, columnspan=3, sticky="w", padx=8, pady=6)
+        remote_can.grid(row=3, column=0, columnspan=3, sticky="w", padx=8, pady=6)
         logging_flash = ttk.Button(
             self.logging_tab,
             text="Flash Croí Locked Configuration",
@@ -1234,7 +1244,7 @@ class OgmaApp(tk.Tk):
             style="Firmware.TButton",
         )
         logging_flash.grid(row=2, column=0, sticky="ew")
-        self.logging_widgets = [sample_period, post_landing, remote_can]
+        self.logging_widgets = [sample_period, minimum_flight, post_landing, remote_can]
         self.logging_flash_widgets = [logging_flash]
 
     def _build_fault_tab(self) -> None:
@@ -1643,6 +1653,7 @@ class OgmaApp(tk.Tk):
     def _apply_logging_config(self, config: LoggingPolicy) -> None:
         values = (
             ("logging_sample_period", tk.IntVar, config.flight_sample_period_ms),
+            ("logging_minimum_flight_minutes", tk.IntVar, config.minimum_flight_ms // 60000),
             ("logging_post_landing", tk.IntVar, config.post_landing_ms),
             ("logging_include_remote_can", tk.BooleanVar, config.include_remote_can),
         )
@@ -1656,6 +1667,7 @@ class OgmaApp(tk.Tk):
     def _logging_policy_from_ui(self) -> LoggingPolicy:
         config = LoggingPolicy(
             flight_sample_period_ms=self.logging_sample_period.get(),
+            minimum_flight_ms=self.logging_minimum_flight_minutes.get() * 60000,
             post_landing_ms=self.logging_post_landing.get(),
             include_remote_can=self.logging_include_remote_can.get(),
         )

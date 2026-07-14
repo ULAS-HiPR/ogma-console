@@ -304,7 +304,7 @@ CROI_MISSION_CONFIG_STATUS = {
 CROI_STATUS = StatusBlock(
     symbol="croi_status",
     magic=0x43524F49,
-    size=320,
+    size=328,
     fields=(
         BinaryField("magic", 0, "I"),
         BinaryField("version", 4, "I"),
@@ -386,6 +386,8 @@ CROI_STATUS = StatusBlock(
         BinaryField("pyro_critical_tx_drops", 308, "I", min_version=9),
         BinaryField("logger_startup_samples_skipped", 312, "I", min_version=10),
         BinaryField("main_fallback_triggered", 316, "I", min_version=11, enum=BOOL_STATUS),
+        BinaryField("logger_free_bytes", 320, "I", unit="B", min_version=12),
+        BinaryField("logger_required_bytes", 324, "I", unit="B", min_version=12),
     ),
 )
 

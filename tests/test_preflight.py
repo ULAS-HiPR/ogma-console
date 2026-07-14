@@ -20,8 +20,10 @@ def _croi_status(manifest: FlightManifest) -> dict[str, int]:
         "sensor_sample_valid": 1,
         "watchdog_init_ok": 1,
         "mission_config_magic": 0x4F474D43,
-        "mission_config_schema_version": 5,
+        "mission_config_schema_version": 6,
         "mission_config_crc32": manifest.mission.crc32(),
+        "logger_free_bytes": 16 * 1024 * 1024,
+        "logger_required_bytes": manifest.logging.required_capacity_bytes(),
         "pyro_continuity_mask": 0,
         "pyro_fired_mask": 0,
         "pyro_critical_tx_drops": 0,
@@ -100,6 +102,22 @@ def test_preflight_fails_mission_crc_mismatch() -> None:
 
     assert not report.go
     assert any(check.name == "mission CRC" and check.state == "fail" for check in report.checks)
+
+
+def test_preflight_fails_insufficient_flight_log_capacity() -> None:
+    manifest = FlightManifest.defaults()
+    status = _croi_status(manifest)
+    status["logger_free_bytes"] = status["logger_required_bytes"] - 1
+
+    report = evaluate_preflight(
+        manifest,
+        _statuses(manifest, status),
+        _telemetry(),
+        0.1,
+    )
+
+    assert not report.go
+    assert any(check.name == "flight log capacity" and check.state == "fail" for check in report.checks)
 
 
 def test_preflight_requires_pyro_continuity_and_pleasc() -> None:

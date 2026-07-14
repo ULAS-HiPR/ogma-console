@@ -161,7 +161,7 @@ Use `ogma-console --help` for the complete command list.
 
 ### Configure a flight
 
-1. Set flight, recovery, airbrake, Lamh failsafe, radio, and logging policy.
+1. Set flight, recovery, airbrake, Lamh failsafe, radio, and logging policy. The guaranteed flight logging window is capacity-checked against Croi's 16 MiB flash.
 2. Save the manifest and run synthetic or CSV replay.
 3. Connect each configurable board and flash its locked configuration.
 4. Read each board's status to collect configuration evidence.
@@ -171,7 +171,7 @@ Use `ogma-console --help` for the complete command list.
 ### Recover Croi data
 
 1. Connect Croi over SWD.
-2. Use **Read Croi Flash** to request bounded chunks from the logger mailbox.
+2. Use **Read Croi Flash** to request bounded chunks from the logger mailbox. Recovery remains available when logging is stopped by a full or undersized flash reserve.
 3. The console validates headers and record CRCs, then saves raw binary, JSON, and CSV output.
 4. Reopen saved sessions later for plotting and analysis.
 

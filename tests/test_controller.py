@@ -221,7 +221,7 @@ def test_flash_croi_mission_detects_builds_flashes_and_verifies(monkeypatch, tmp
     record_path = tmp_path / "mission.json"
     status = {
         "mission_config_magic": 0x4F474D43,
-        "mission_config_schema_version": 5,
+            "mission_config_schema_version": 6,
         "mission_config_crc32": config.crc32(),
     }
 
@@ -246,7 +246,7 @@ def test_flash_croi_mission_accepts_valid_pyro_channels(monkeypatch, tmp_path) -
     profile = profile_for("croi")
     status = {
         "mission_config_magic": 0x4F474D43,
-        "mission_config_schema_version": 5,
+            "mission_config_schema_version": 6,
         "mission_config_crc32": config.crc32(),
     }
     monkeypatch.setattr(controller, "detect", lambda enrich_status=False: DetectionResult(profile, None, "test"))

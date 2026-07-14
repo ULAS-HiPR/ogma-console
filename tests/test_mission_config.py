@@ -6,6 +6,7 @@ import pytest
 
 from ogma_app.mission_config import (
     CROI_MISSION_CONFIG_MAGIC,
+    LoggingPolicy,
     MissionConfig,
     build_mission_timeline,
     load_croi_mission_config,
@@ -14,6 +15,23 @@ from ogma_app.mission_config import (
     save_mission_json,
     write_croi_mission_header,
 )
+
+
+def test_logging_policy_budgets_configured_flight_window() -> None:
+    policy = LoggingPolicy()
+
+    assert policy.mode == "flight_window"
+    assert policy.required_capacity_bytes() == 2_570_400
+    policy.validate()
+
+
+def test_logging_policy_rejects_window_larger_than_flash() -> None:
+    with pytest.raises(ValueError, match="flash capacity"):
+        LoggingPolicy(
+            flight_sample_period_ms=20,
+            minimum_flight_ms=7_200_000,
+            post_landing_ms=600_000,
+        ).validate()
 
 
 def test_mission_config_header_and_json_round_trip(tmp_path) -> None:
@@ -131,5 +149,5 @@ def test_mission_timeline_states_disabled_outputs_explicitly() -> None:
 
 def test_checked_in_croi_mission_header_matches_its_manifest_crc() -> None:
     header = Path(__file__).resolve().parents[2] / "croi" / "firmware" / "include" / "croi_mission_config.h"
-    assert load_croi_mission_config(header).crc32() == 0xFD7B8525
+    assert load_croi_mission_config(header).crc32() == 0x44A2AA23
     assert header.read_text(encoding="utf-8") == render_croi_mission_header(MissionConfig.defaults())

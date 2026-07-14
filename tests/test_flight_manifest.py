@@ -24,6 +24,19 @@ def test_manifest_round_trip_and_hash(tmp_path) -> None:
     assert manifest.sha256() in path.read_text(encoding="utf-8")
 
 
+def test_manifest_migrates_boot_logging_to_flight_window() -> None:
+    values = FlightManifest.defaults().canonical_dict()
+    values["schema_version"] = 1
+    values["logging"]["mode"] = "continuous_from_boot"
+    values["logging"].pop("minimum_flight_ms")
+
+    migrated = FlightManifest.from_dict(values)
+
+    assert migrated.schema_version == 2
+    assert migrated.logging.mode == "flight_window"
+    assert migrated.logging.minimum_flight_ms == 1_200_000
+
+
 def test_manifest_rejects_tampered_payload(tmp_path) -> None:
     path = save_flight_manifest(tmp_path, FlightManifest.defaults())
     payload = json.loads(path.read_text(encoding="utf-8"))

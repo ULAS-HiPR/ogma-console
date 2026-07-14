@@ -91,7 +91,7 @@ def test_croi_health_checks_mission_manifest_when_present() -> None:
         "croi",
         {
             "mission_config_magic": 0x4F474D43,
-            "mission_config_schema_version": 5,
+            "mission_config_schema_version": 6,
         },
     )
 

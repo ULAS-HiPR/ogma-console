@@ -11,8 +11,11 @@ from typing import Any
 
 
 CROI_MISSION_CONFIG_MAGIC = 0x4F474D43
-CROI_MISSION_CONFIG_SCHEMA_VERSION = 5
+CROI_MISSION_CONFIG_SCHEMA_VERSION = 6
 CROI_MISSION_DEFAULT_LIFTOFF_ACCEL_M_S2 = 20.0
+CROI_FLASH_CAPACITY_BYTES = 16 * 1024 * 1024
+CROI_FLIGHT_RECORD_BYTES = 100
+CROI_REMOTE_RECORD_BYTES = 104
 
 
 def _optional_channel(value: int | None) -> int | None:
@@ -50,18 +53,31 @@ class RecoveryFallbackConfig:
 
 @dataclass(frozen=True)
 class LoggingPolicy:
-    mode: str = "continuous_from_boot"
+    mode: str = "flight_window"
     flight_sample_period_ms: int = 100
+    minimum_flight_ms: int = 1_200_000
     post_landing_ms: int = 60000
     include_remote_can: bool = True
 
     def validate(self) -> None:
-        if self.mode != "continuous_from_boot":
+        if self.mode != "flight_window":
             raise ValueError("unsupported logging mode")
         if not 20 <= self.flight_sample_period_ms <= 1000:
             raise ValueError("flight logging period must be 20 to 1000 ms")
+        if not 60000 <= self.minimum_flight_ms <= 7_200_000:
+            raise ValueError("minimum flight logging time must be 60000 to 7200000 ms")
         if not 0 <= self.post_landing_ms <= 600000:
             raise ValueError("post-landing logging time must be 0 to 600000 ms")
+        if self.required_capacity_bytes() > CROI_FLASH_CAPACITY_BYTES:
+            raise ValueError("configured logging window exceeds Croí flash capacity")
+
+    def required_capacity_bytes(self) -> int:
+        duration_ms = self.minimum_flight_ms + self.post_landing_ms
+        samples = (duration_ms + self.flight_sample_period_ms - 1) // self.flight_sample_period_ms
+        per_sample = CROI_FLIGHT_RECORD_BYTES
+        if self.include_remote_can:
+            per_sample += CROI_REMOTE_RECORD_BYTES
+        return samples * per_sample
 
 
 @dataclass(frozen=True)
@@ -355,6 +371,7 @@ def render_croi_mission_header(
             f"#define CROI_MISSION_MAIN_BACKUP_MAX_ALTITUDE_M {recovery.max_altitude_m}U",
             f"#define CROI_MISSION_MAIN_BACKUP_REQUIRED_SAMPLES {recovery.required_samples}U",
             f"#define CROI_LOGGING_FLIGHT_SAMPLE_PERIOD_MS {logging.flight_sample_period_ms}U",
+            f"#define CROI_LOGGING_MINIMUM_FLIGHT_MS {logging.minimum_flight_ms}U",
             f"#define CROI_LOGGING_POST_LANDING_MS {logging.post_landing_ms}U",
             f"#define CROI_LOGGING_INCLUDE_REMOTE_CAN {int(logging.include_remote_can)}U",
             "",
@@ -396,6 +413,9 @@ def render_croi_mission_header(
             "#endif",
             "#if CROI_LOGGING_FLIGHT_SAMPLE_PERIOD_MS < 20U || CROI_LOGGING_FLIGHT_SAMPLE_PERIOD_MS > 1000U",
             "#error \"flight logging period is invalid\"",
+            "#endif",
+            "#if CROI_LOGGING_MINIMUM_FLIGHT_MS < 60000U || CROI_LOGGING_MINIMUM_FLIGHT_MS > 7200000U",
+            "#error \"minimum flight logging duration is invalid\"",
             "#endif",
             "#if CROI_LOGGING_POST_LANDING_MS > 600000U",
             "#error \"post-landing logging duration is invalid\"",
@@ -473,7 +493,7 @@ def save_mission_flash_record(
 def load_mission_json(path: Path) -> MissionConfig:
     payload = json.loads(path.read_text(encoding="utf-8"))
     schema_version = int(payload.get("schema_version", 0))
-    if schema_version not in (1, 2, 3, 4, CROI_MISSION_CONFIG_SCHEMA_VERSION):
+    if schema_version not in (1, 2, 3, 4, 5, CROI_MISSION_CONFIG_SCHEMA_VERSION):
         raise ValueError("unsupported mission JSON schema")
     mission = payload.get("mission")
     if not isinstance(mission, dict):
@@ -502,8 +522,24 @@ def load_mission_json(path: Path) -> MissionConfig:
             logging_values = payload.get("logging", {})
             if not isinstance(logging_values, dict):
                 raise ValueError("mission JSON logging policy is invalid")
-            logging = LoggingPolicy(**logging_values)
-            expected_crc = config.crc32(recovery, logging)
+            if schema_version >= 6:
+                logging = LoggingPolicy(**logging_values)
+                expected_crc = config.crc32(recovery, logging)
+            else:
+                mission_fields = config.canonical_dict()
+                del mission_fields["name"]
+                expected_crc = zlib.crc32(
+                    json.dumps(
+                        {
+                            "mission": mission_fields,
+                            "recovery": recovery_values,
+                            "logging": logging_values,
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        ensure_ascii=True,
+                    ).encode("ascii")
+                ) & 0xFFFFFFFF
         else:
             mission_fields = config.canonical_dict()
             del mission_fields["name"]

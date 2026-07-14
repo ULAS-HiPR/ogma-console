@@ -148,6 +148,18 @@ def _croi_checks(manifest: FlightManifest, evidence: StatusEvidence | None) -> l
         checks.append(
             _check("Croí", label, "pass" if actual == expected else "fail", str(actual), str(expected), "SWD")
         )
+    free_bytes = int(status.get("logger_free_bytes", -1))
+    required_bytes = int(status.get("logger_required_bytes", -1))
+    checks.append(
+        _check(
+            "Croí",
+            "flight log capacity",
+            "pass" if required_bytes > 0 and free_bytes >= required_bytes else "fail",
+            f"{free_bytes} B free",
+            f">= {required_bytes} B",
+            "SWD",
+        )
+    )
     for field, expected, label, display in (
         ("mission_config_magic", CROI_MISSION_CONFIG_MAGIC, "mission magic", "hex"),
         ("mission_config_schema_version", CROI_MISSION_CONFIG_SCHEMA_VERSION, "mission schema", "int"),
