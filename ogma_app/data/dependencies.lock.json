@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "dependencies": {
+    "braiteoiri": {
+      "branch": "ogma/flight-hardening",
+      "commit": "0e046836d9c57c004fdc3658b102376f706a2ea9"
+    },
+    "comheadan": {
+      "branch": "ogma/flight-hardening",
+      "commit": "01f8aefc5d8effafc560f7d29bc8728fc28c1f23"
+    }
+  },
+  "boards": {
+    "croi": ["braiteoiri", "comheadan"],
+    "foinse": ["braiteoiri", "comheadan"],
+    "lamh": ["braiteoiri", "comheadan"],
+    "pleasc": ["comheadan"],
+    "teachtaire": ["braiteoiri", "comheadan"]
+  }
+}

@@ -1,0 +1,84 @@
+﻿CAN Frame Payload Layouts — Byte-Level Reference,,,,,,
+All multi-byte fields are little-endian.,,,,,,
+Frame,Byte(s),Field,Type,Units / Scale,Range,Notes
+IMU_ACCEL,0–1,ax,int16,0.001 g / LSB,±32 g,
+,2–3,ay,int16,0.001 g / LSB,±32 g,
+,4–5,az,int16,0.001 g / LSB,±32 g,
+,6–7,timestamp_ms,uint16,1 ms / LSB,0–65535 ms (wraps),Synced via SYNC frame (LSB of Sync Frame)
+,,,,,,
+IMU_GYRO,0–1,gx,int16,0.061°/s / LSB,±2000°/s,LSM6DSO32
+,2–3,gy,int16,0.061°/s / LSB,±2000°/s,
+,4–5,gz,int16,0.061°/s / LSB,±2000°/s,
+,6–7,timestamp_ms,uint16,1 ms / LSB,0–65535 ms,
+,,,,,,
+BARO,0–3,pressure,uint32,1 Pa / LSB,"30,000–110,000 Pa",BMP390 pressure
+,4–5,temp,int16,0.01°C / LSB,-40 to +85°C,
+,6–7,altitude_m,int16,0.1 m / LSB,±3276.7 m,Barometric altitude
+,,,,,,
+FLIGHT_STATE,0,state,uint8,enum,,TBD
+,1,flags,uint8,bitmask,,Reserved flight-state flags
+,2–3,timestamp_ms,uint16,1 ms / LSB,0–65535 ms,Master timestamp from Croí
+,,,,,,
+KALMANN,0–1,acceleration_m_s2,int16,0.01 m/s^2 / LSB,±327.67 m/s^2,Filtered vertical acceleration
+,2–3,altitude_m,int16,1 m / LSB,±32767 m,Filtered altitude
+,4–5,vspeed_m_s,int16,0.01 m/s / LSB,±327.67 m/s,Filtered vertical speed
+,6–7,timestamp_ms,uint16,1 ms / LSB,0–65535 ms,Master timestamp from Croí
+,,,,,,
+PYRO_ARM,0,channel_mask,uint8,bitmask,b0–b3 = ch0–ch3,Set bits = channels to arm
+,1,command,uint8,enum,0xA1,Arm command discriminator
+,2–3,sequence,uint16,counter,1–65535,Monotonic command sequence
+,4–5,mission_tag,uint16,tag,,Mission configuration tag
+,6–7,command_tag,uint16,tag,,Derived accidental-command guard
+,,,,,,
+PYRO_FIRE,0,channel,uint8,0–3,Channel index,
+,1,command,uint8,enum,0xF4=drogue 0xF5=main,Fire command discriminator
+,2–3,sequence,uint16,counter,1–65535,Must be newer than prior command
+,4–5,mission_tag,uint16,tag,,Must match armed mission
+,6–7,command_tag,uint16,tag,,Derived accidental-command guard
+,,,,,,
+PYRO_ACK,0,channel,uint8,0–3,Channel index,
+,1,result,uint8,enum,0=FIRED 1=FAULT 2=ACCEPTED,
+,2,fault_code,uint8,enum,0=OK 1=NO_CONT 2=BAD_MAGIC 3=NOT_ARMED,
+,3,command,uint8,enum,,Acknowledged command
+,4–5,sequence,uint16,counter,,Acknowledged sequence
+,6–7,mission_tag,uint16,tag,,Acknowledged mission
+,,,,,,
+POWER_MAIN,0–1,vbat_mv,uint16,1 mV / LSB,0–25000 mV,Main LiPo voltage
+,2–3,ibat_ma,uint16,1 mA / LSB,0–30000 mA,Main rail current draw
+,4,soc_pct,uint8,1% / LSB,0–100%,State of charge estimate
+,5,flags,uint8,bitmask,b0=ibat valid b1=vbat valid b2=soc valid,Foinse sets b0 only; it does not measure voltage or SOC
+,6–7,reserved,uint16,—,0x0000,
+,,,,,,
+POWER_SERVO,0–1,vservo_mv,uint16,1 mV / LSB,0–10000 mV,Servo rail voltage
+,2–3,iservo_ma,uint16,1 mA / LSB,0–10000 mA,Servo rail current
+,4,temp_c,int8,1°C / LSB,-40 to +127°C,Board temperature; invalid unless b3 is set
+,5,flags,uint8,bitmask,b0=overcurrent b1=iservo valid b2=vservo valid b3=temp valid,Foinse sets b1 only; it does not measure servo voltage or temperature
+,6–7,reserved,uint16,—,0x0000,
+,,,,,,
+SYNC,0–3,timestamp_ms,uint32,1 ms / LSB,0–4294967295 ms,Master clock. ~49 days before wrap. Nodes correct local timer on receipt.
+,,,,,,
+PYRO_STATUS,0,armed,uint8,bitmask,,
+,1,cont_check,uint8,bitmask,,
+,2,faults1,uint8,bitmask,,
+,3,faults2,uint8,bitmask,,
+,4,fired,uint8,bitmask,,
+,5,croi_state,uint8,enum,,
+,6–7,last_sequence,uint16,counter,,
+,,,,,,
+ACTUATOR_COMMAND,0,output_index,uint8,0–3,Logical Lámh output index
+,1,flags,uint8,bitmask,b0=active
+,2–3,angle_cdeg,int16,0.01 deg / LSB,0–9000 cdeg
+,4–5,sequence,uint16,counter,Monotonic while active
+,6–7,lease_ms,uint16,1 ms / LSB,500–2000 ms,Command validity lease
+,,,,,,
+TX_STATUS,0,rssi_dbm,int8,1 dBm / LSB,,Last packet RSSI
+,1,snr_db,int8,1 dB / LSB,,Last packet SNR
+,2,tx_queue,uint8,count,0–255,CAN TX queue depth
+,3,flags,uint8,bitmask,b0=LoRa ready b1=GNSS fix,
+,,,,,,
+MUON_CPM,0–1,cpm,uint16,1 count/min / LSB,,Muon count rate
+,2–5,total_counts,uint32,count,,Cumulative detections
+,6–7,reserved,uint16,—,0x0000,
+,,,,,,
+,,,,,,
+,,,,,,

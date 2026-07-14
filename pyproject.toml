@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ogma-console"
+version = "0.1.0"
+description = "Unified desktop console for configuring, flashing, diagnosing, and recovering Ogma flight-computer boards, with live CAN and LoRa ground telemetry."
+readme = "README.md"
+requires-python = ">=3.11"
+
+[project.scripts]
+ogma-console = "ogma_app.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["ogma_app*"]
+
+[tool.setuptools.package-data]
+ogma_app = ["data/*.csv", "data/*.h", "data/*.json", "native/*.cpp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
