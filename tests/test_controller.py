@@ -1,5 +1,6 @@
-from pathlib import Path
+import struct
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -16,6 +17,17 @@ class DummySession:
 
     def stop(self) -> None:
         self.stopped = True
+
+
+class StatusSession(DummySession):
+    def __init__(self, data: bytes | None = None) -> None:
+        super().__init__()
+        self.data = data
+
+    def read_bytes(self, _address: int, _count: int) -> bytes:
+        if self.data is None:
+            raise RuntimeError("transient mdw failure")
+        return self.data
 
 
 def test_flash_closes_openocd_session_before_upload(monkeypatch) -> None:
@@ -55,6 +67,33 @@ def test_flash_selects_configured_stlink(monkeypatch) -> None:
     controller.flash("foinse", "stm32f072c8t6")
 
     assert calls == [("066EFF495365495067182508", "target/stm32f0x.cfg")]
+
+
+def test_status_read_reconnects_once_after_transient_failure(monkeypatch) -> None:
+    logs: list[str] = []
+    controller = OgmaController(Path("/tmp/ogma-test"), logs.append)
+    profile = profile_for("foinse")
+    assert profile.status_block is not None
+    valid_status = bytearray(profile.status_block.size)
+    struct.pack_into("<II", valid_status, 0, profile.status_block.magic, 5)
+    sessions = iter((StatusSession(), StatusSession(bytes(valid_status))))
+
+    def next_session(_profile):
+        session = next(sessions)
+        controller.session = session  # type: ignore[assignment]
+        return session
+
+    monkeypatch.setattr(
+        "ogma_app.controller.symbol_addresses",
+        lambda *_args, **_kwargs: {profile.status_block.symbol: 0x20000000},
+    )
+    monkeypatch.setattr(controller, "_session_for", next_session)
+    monkeypatch.setattr("ogma_app.controller.time.sleep", lambda _seconds: None)
+
+    status = controller._read_profile_status(profile)
+
+    assert status["magic"] == profile.status_block.magic
+    assert any("reconnecting once" in message for message in logs)
 
 
 def test_flash_detected_uses_detected_profile_default_env(monkeypatch) -> None:

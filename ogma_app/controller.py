@@ -310,9 +310,20 @@ class OgmaController:
             build_if_missing=build_if_missing,
         )
         address = symbols[profile.status_block.symbol]
-        session = self._session_for(profile)
-        data = session.read_bytes(address, profile.status_block.size)
-        return profile.status_block.parse(data)
+        for attempt in range(2):
+            try:
+                session = self._session_for(profile)
+                data = session.read_bytes(address, profile.status_block.size)
+                return profile.status_block.parse(data)
+            except Exception as exc:
+                self.close()
+                if attempt == 1:
+                    raise
+                self.log(
+                    f"{profile.display_name} status read failed; reconnecting once: {exc}"
+                )
+                time.sleep(0.1)
+        raise RuntimeError(f"{profile.display_name} status read failed")
 
     def detect(self, enrich_status: bool = True) -> DetectionResult:
         reasons: list[str] = []
