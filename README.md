@@ -109,6 +109,12 @@ If the repositories are elsewhere, point the app at their parent workspace:
 export OGMA_ROOT=/path/to/ogma
 ```
 
+Source checkouts write session data to `runs/`. Installed packages use the operating system's user data directory. Override either location when needed:
+
+```sh
+export OGMA_RUNS_ROOT=/path/to/ogma-runs
+```
+
 ## Running
 
 Start the GUI:
@@ -178,7 +184,7 @@ Use `ogma-console --help` for the complete command list.
 
 ## Data And Evidence
 
-Runtime output is written below `runs/` and is intentionally excluded from Git. Depending on the operation, a bundle may include raw serial data, flash images, decoded JSON, CSV tables, health reports, manifest records, plots, firmware provenance, and validation results.
+Runtime output is written below the configured runs directory and is intentionally excluded from Git in source checkouts. Depending on the operation, a bundle may include raw serial data, flash images, decoded JSON, CSV tables, health reports, manifest records, plots, firmware provenance, and validation results.
 
 The console keeps action and evidence paths separate: passive status can be read continuously, while build/flash, actuator, erase, and configuration operations require explicit commands and board-specific checks.
 
