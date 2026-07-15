@@ -36,6 +36,16 @@ def test_parse_mixed_telemetry_warns_on_unclassified_line() -> None:
     assert parsed["summary"]["warnings"]
 
 
+def test_parse_mixed_telemetry_ignores_circuitpython_terminal_title() -> None:
+    parsed = parse_mixed_telemetry_text(
+        "\x1b]0;code.py | 10.2.1\x1b\\#OGMA packet sequence=1 type=1\n"
+        "300#E803D00764000000\n",
+        _frames(),
+    )
+    assert parsed["summary"]["can_frames"] == 1
+    assert parsed["summary"]["warnings"] == []
+
+
 def test_save_mixed_telemetry_bundle(tmp_path: Path) -> None:
     parsed = parse_mixed_telemetry_text("53,-6,6,100,10\n423#03000001\n", _frames())
     out = save_mixed_telemetry_bundle(parsed, "source.log", tmp_path, raw_text="raw")
@@ -59,6 +69,16 @@ def test_incremental_telemetry_handles_split_lines() -> None:
     assert parsed["summary"]["can_frames"] == 1
     assert parsed["summary"]["heartbeat_nodes"] == 1
     assert len(parsed["summary"]["warnings"]) == 1
+
+
+def test_incremental_telemetry_ignores_circuitpython_terminal_title() -> None:
+    accumulator = MixedTelemetryAccumulator(_frames())
+    accumulator.feed("\x1b]0;code.py | 10.2.1\x1b\\#OGMA packet sequence=1 type=1\n")
+    accumulator.feed("300#E803D00764000000\n")
+
+    parsed = accumulator.snapshot()
+    assert parsed["summary"]["can_frames"] == 1
+    assert parsed["summary"]["warnings"] == []
 
 
 def test_incremental_telemetry_bounds_display_history_without_losing_totals() -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import datetime as dt
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,15 @@ from .can_decoder import decode_can_frame, parse_can_log_line, summarize_stack_h
 from .can_layouts import CanFrameLayout, attach_can_ids, load_can_ids, load_payload_layouts
 from .groundstation import parse_groundstation_text
 from .paths import CAN_FRAMES_HEADER, PAYLOAD_LAYOUTS_CSV
+
+
+_TERMINAL_CONTROL_RE = re.compile(
+    r"\x1b\].*?(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]"
+)
+
+
+def _clean_serial_line(line: str) -> str:
+    return _TERMINAL_CONTROL_RE.sub("", line).strip()
 
 
 def load_default_can_frames() -> dict[str, CanFrameLayout]:
@@ -26,7 +36,7 @@ def parse_mixed_telemetry_text(text: str, frames: dict[str, CanFrameLayout]) -> 
     warnings: list[str] = []
     total_lines = 0
     for line_no, line in enumerate(text.splitlines(), start=1):
-        stripped = line.strip()
+        stripped = _clean_serial_line(line)
         if not stripped or stripped.startswith("#"):
             continue
         total_lines += 1
@@ -143,7 +153,7 @@ class MixedTelemetryAccumulator:
 
     def _process_line(self, line: str) -> None:
         self.source_line += 1
-        stripped = line.strip()
+        stripped = _clean_serial_line(line)
         if not stripped or stripped.startswith("#"):
             return
         self.total_lines += 1

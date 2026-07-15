@@ -9,7 +9,7 @@ from typing import Any, Callable, Protocol
 from .boards import BoardProfile
 from .controller import DetectionResult
 from .health import evaluate_health
-from .probe import ProbeResult, probe_stlink
+from .probe import ProbeResult
 
 
 class ValidationController(Protocol):
@@ -28,7 +28,7 @@ def run_bench_validation(
     controller: ValidationController,
     expected_board_id: str | None,
     out_root: Path,
-    probe_fn: Callable[[], ProbeResult] = probe_stlink,
+    probe_fn: Callable[[], ProbeResult] | None = None,
 ) -> ValidationRunResult:
     report: dict[str, Any] = {
         "timestamp_utc": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
@@ -42,13 +42,17 @@ def run_bench_validation(
         "warnings": [],
     }
 
-    try:
-        probe = probe_fn()
-        report["probe"] = _probe_dict(probe)
-        if not probe.connected:
-            report["errors"].append("ST-Link target not connected")
-    except Exception as exc:
-        report["errors"].append(f"probe failed: {exc}")
+    # st-info --probe resets or halts some STM32/ST-Link combinations. Automatic
+    # validation relies on the identity/status OpenOCD path, which resumes the
+    # target after each read. Tests may inject a non-disruptive probe function.
+    if probe_fn is not None:
+        try:
+            probe = probe_fn()
+            report["probe"] = _probe_dict(probe)
+            if not probe.connected:
+                report["errors"].append("ST-Link target not connected")
+        except Exception as exc:
+            report["errors"].append(f"probe failed: {exc}")
 
     try:
         detection = controller.detect()

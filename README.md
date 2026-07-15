@@ -188,6 +188,8 @@ Runtime output is written below the configured runs directory and is intentional
 
 The console keeps action and evidence paths separate: passive status can be read continuously, while build/flash, actuator, erase, and configuration operations require explicit commands and board-specific checks.
 
+The reviewed [HIL campaign, release criteria, and run reports](docs/testing/README.md) are versioned with the console. Reports distinguish build success, bench evidence, and flight acceptance; raw captures remain outside Git in `runs/` and the Ogma workspace's `output/hil/` directory.
+
 ## Development
 
 Run the test suite:
