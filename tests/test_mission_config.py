@@ -1,5 +1,6 @@
 import json
 import zlib
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,7 @@ from ogma_app.mission_config import (
     CROI_MISSION_CONFIG_MAGIC,
     LoggingPolicy,
     MissionConfig,
+    RecoveryFallbackConfig,
     build_mission_timeline,
     load_croi_mission_config,
     load_mission_json,
@@ -21,7 +23,7 @@ def test_logging_policy_budgets_configured_flight_window() -> None:
     policy = LoggingPolicy()
 
     assert policy.mode == "flight_window"
-    assert policy.required_capacity_bytes() == 2_570_400
+    assert policy.required_capacity_bytes() == 3_124_800
     policy.validate()
 
 
@@ -116,6 +118,36 @@ def test_schema_two_mission_crc_is_checked_before_timed_stow_migration(tmp_path)
     assert migrated.airbrake_stow_delay_ms == 120000
 
 
+def test_schema_six_mission_without_detection_remains_readable(tmp_path) -> None:
+    config = MissionConfig.defaults()
+    recovery = RecoveryFallbackConfig()
+    logging = LoggingPolicy()
+    mission_fields = config.canonical_dict()
+    del mission_fields["name"]
+    safety_fields = {
+        "mission": mission_fields,
+        "recovery": asdict(recovery),
+        "logging": asdict(logging),
+    }
+    encoded = json.dumps(
+        safety_fields,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("ascii")
+    payload = {
+        "schema_version": 6,
+        "mission_crc32": f"{zlib.crc32(encoded) & 0xFFFFFFFF:08x}",
+        "mission": config.canonical_dict(),
+        "recovery": asdict(recovery),
+        "logging": asdict(logging),
+    }
+    path = tmp_path / "schema6.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    assert load_mission_json(path) == config
+
+
 def test_mission_magic_is_stable() -> None:
     assert CROI_MISSION_CONFIG_MAGIC == 0x4F474D43
 
@@ -149,5 +181,5 @@ def test_mission_timeline_states_disabled_outputs_explicitly() -> None:
 
 def test_checked_in_croi_mission_header_matches_its_manifest_crc() -> None:
     header = Path(__file__).resolve().parents[2] / "croi" / "firmware" / "include" / "croi_mission_config.h"
-    assert load_croi_mission_config(header).crc32() == 0x44A2AA23
+    assert load_croi_mission_config(header).crc32() == 0x11B80BC5
     assert header.read_text(encoding="utf-8") == render_croi_mission_header(MissionConfig.defaults())

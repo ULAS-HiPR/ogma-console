@@ -260,7 +260,7 @@ def test_flash_croi_mission_detects_builds_flashes_and_verifies(monkeypatch, tmp
     record_path = tmp_path / "mission.json"
     status = {
         "mission_config_magic": 0x4F474D43,
-            "mission_config_schema_version": 6,
+            "mission_config_schema_version": 7,
         "mission_config_crc32": config.crc32(),
     }
 
@@ -268,7 +268,10 @@ def test_flash_croi_mission_detects_builds_flashes_and_verifies(monkeypatch, tmp
     monkeypatch.setattr(controller, "build", lambda board_id, env: calls.append(("build:" + board_id, env)))
     monkeypatch.setattr(controller, "flash", lambda board_id, env: calls.append(("flash:" + board_id, env)))
     monkeypatch.setattr(controller, "read_status", lambda board_id, env: status)
-    monkeypatch.setattr("ogma_app.controller.write_croi_mission_header", lambda _path, _config, _recovery, _logging: header_path)
+    monkeypatch.setattr(
+        "ogma_app.controller.write_croi_mission_header",
+        lambda _path, _config, _recovery, _logging, _detection: header_path,
+    )
     monkeypatch.setattr("ogma_app.controller.save_mission_flash_record", lambda *_args: record_path)
 
     result = controller.flash_croi_mission_config(config)
@@ -285,14 +288,17 @@ def test_flash_croi_mission_accepts_valid_pyro_channels(monkeypatch, tmp_path) -
     profile = profile_for("croi")
     status = {
         "mission_config_magic": 0x4F474D43,
-            "mission_config_schema_version": 6,
+            "mission_config_schema_version": 7,
         "mission_config_crc32": config.crc32(),
     }
     monkeypatch.setattr(controller, "detect", lambda enrich_status=False: DetectionResult(profile, None, "test"))
     monkeypatch.setattr(controller, "build", lambda _board_id, _env: tmp_path / "firmware.elf")
     monkeypatch.setattr(controller, "flash", lambda _board_id, _env: None)
     monkeypatch.setattr(controller, "read_status", lambda _board_id, _env: status)
-    monkeypatch.setattr("ogma_app.controller.write_croi_mission_header", lambda _path, _config, _recovery, _logging: tmp_path / "mission.h")
+    monkeypatch.setattr(
+        "ogma_app.controller.write_croi_mission_header",
+        lambda _path, _config, _recovery, _logging, _detection: tmp_path / "mission.h",
+    )
     monkeypatch.setattr("ogma_app.controller.save_mission_flash_record", lambda *_args: tmp_path / "record.json")
 
     result = controller.flash_croi_mission_config(config)

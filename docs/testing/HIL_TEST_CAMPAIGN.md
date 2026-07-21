@@ -89,11 +89,16 @@ Record firmware SHA, submodule SHAs, mission CRC, board serial, operator, UTC ti
 
 ## 3. Croi Flight And Logger
 
-- Save the versioned flight manifest and archive its SHA-256. Verify Croi reports mission schema 6 and the exact generated mission/logging CRC after flash.
+- Save the versioned flight manifest and archive its SHA-256. Verify Croi reports mission schema 7 and the exact generated mission/detection/logging CRC after flash.
 - Run Ogma Console native replay against nominal and adversarial CSV profiles before hardware replay. Require the replayed transition sequence to match Croi SIL because both execute `FlightPhaseLogic` directly.
 - Replay calibrated launch profiles: no-launch vibration, nominal flight, slow liftoff, high acceleration, sensor dropout, false apogee, baro spike, IMU saturation, and power interruption.
 - Verify exact state sequence: calibrating, ready, powered, coasting, drogue, main, landed.
-- Verify three-sample transition confirmation and five-second landing confirmation.
+- Verify liftoff, burnout, and apogee persistence in milliseconds at the configured sample period. Prove a single threshold crossing cannot transition.
+- Prove the minimum-powered and minimum-coast gates independently; hold every other condition true while each gate is false.
+- Inject a barometric descent while inertial ascent speed exceeds the lockout; require no apogee transition and a recorded high-speed rejection.
+- Fail only the barometer, only the IMU, and both sensors. Verify the fault timeout, detector mode, longer one-sensor dwell, transition reason, and altitude-gated no-sensor timeout.
+- Verify every transition record contains candidate, confirmed-vote, gate, rejection, mode, health, and reason fields matching the replay stimulus.
+- Verify five-second landing confirmation.
 - Enable the main backup only with inert loads first. Verify delay, descent-speed threshold, altitude window, consecutive-sample reset, `main_fallback_triggered`, and exactly one transition to MAIN. Repeat with every individual guard false.
 - Verify configured sample period, post-landing duration, and remote-CAN inclusion against recovered records; do not infer policy only from source code.
 - Fill, power-cycle, read, wipe, and reuse flash. Require record CRCs, monotonic sequence, correct run IDs, and no data beyond reported used length.

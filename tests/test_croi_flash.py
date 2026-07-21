@@ -47,6 +47,26 @@ def test_parse_croi_flight_record() -> None:
     assert parsed["flight"][0]["state"] == 3
 
 
+def test_parse_croi_flight_v2_phase_evidence() -> None:
+    payload = bytearray(104)
+    struct.pack_into("<I", payload, 0, 5000)
+    struct.pack_into("<h", payload, 56, 4)
+    struct.pack_into("<I", payload, 60, 0x70)
+    struct.pack_into("<I", payload, 64, 0x60)
+    struct.pack_into("<i", payload, 88, -225)
+    struct.pack_into("<i", payload, 92, 15325)
+    struct.pack_into("<BBBB", payload, 100, 2, 0, 5, 0x1F)
+
+    parsed = parse_croi_flash_dump(_record(bytes(payload), payload_version=2) + b"\xff" * 64)
+    flight = parsed["flight"][0]
+
+    assert flight["phase_candidate_mask"] == 0x70
+    assert flight["phase_confirmed_vote_mask"] == 0x60
+    assert flight["phase_inertial_velocity_m_s"] == -2.25
+    assert flight["phase_baro_peak_altitude_m"] == 153.25
+    assert flight["phase_last_transition_reason_name"] == "apogee-voting"
+
+
 def test_parse_croi_pyro_event_record() -> None:
     payload = bytearray(64)
     struct.pack_into("<I", payload, 44, 5000)

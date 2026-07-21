@@ -175,11 +175,31 @@ def test_croi_status_parse_logger_capacity_extension() -> None:
     struct.pack_into("<I", data, 0, CROI_STATUS.magic)
     struct.pack_into("<I", data, 4, 12)
     struct.pack_into("<I", data, 320, 5_000_000)
-    struct.pack_into("<I", data, 324, 2_570_400)
+    struct.pack_into("<I", data, 324, 3_124_800)
     parsed = CROI_STATUS.parse(bytes(data))
 
     assert parsed["logger_free_bytes"] == 5_000_000
-    assert parsed["logger_required_bytes"] == 2_570_400
+    assert parsed["logger_required_bytes"] == 3_124_800
+
+
+def test_croi_status_parse_phase_detector_extension() -> None:
+    data = bytearray(CROI_STATUS.size)
+    struct.pack_into("<I", data, 0, CROI_STATUS.magic)
+    struct.pack_into("<I", data, 4, 13)
+    struct.pack_into("<I", data, 328, 0x60)
+    struct.pack_into("<I", data, 332, 0x20)
+    struct.pack_into("<i", data, 356, -125)
+    struct.pack_into("<B", data, 368, 2)
+    struct.pack_into("<B", data, 369, 1)
+    struct.pack_into("<B", data, 370, 6)
+    parsed = CROI_STATUS.parse(bytes(data))
+
+    assert parsed["phase_candidate_mask"] == 0x60
+    assert parsed["phase_confirmed_vote_mask"] == 0x20
+    assert parsed["phase_inertial_velocity_m_s"] == -1.25
+    assert parsed["phase_required_votes"] == 2
+    assert parsed["phase_detector_mode"] == 1
+    assert parsed["phase_last_transition_reason"] == 6
 
 
 def test_croi_status_parse_minimal() -> None:

@@ -300,11 +300,33 @@ CROI_MISSION_CONFIG_STATUS = {
     0x4F474D43: "loaded",
 }
 
+CROI_PHASE_TRANSITION_REASON = {
+    0: "none",
+    1: "liftoff acceleration",
+    2: "liftoff barometric climb",
+    3: "burnout acceleration",
+    4: "burnout timeout",
+    5: "apogee voting",
+    6: "apogee barometer fallback",
+    7: "apogee inertial fallback",
+    8: "apogee timeout",
+    9: "main altitude",
+    10: "main fast descent",
+    11: "landed",
+}
+
+CROI_PHASE_DETECTOR_MODE = {
+    0: "IMU + barometer",
+    1: "barometer only",
+    2: "IMU only",
+    3: "no sensors",
+}
+
 
 CROI_STATUS = StatusBlock(
     symbol="croi_status",
     magic=0x43524F49,
-    size=328,
+    size=372,
     fields=(
         BinaryField("magic", 0, "I"),
         BinaryField("version", 4, "I"),
@@ -388,6 +410,20 @@ CROI_STATUS = StatusBlock(
         BinaryField("main_fallback_triggered", 316, "I", min_version=11, enum=BOOL_STATUS),
         BinaryField("logger_free_bytes", 320, "I", unit="B", min_version=12),
         BinaryField("logger_required_bytes", 324, "I", unit="B", min_version=12),
+        BinaryField("phase_candidate_mask", 328, "I", min_version=13),
+        BinaryField("phase_confirmed_vote_mask", 332, "I", min_version=13),
+        BinaryField("phase_gate_mask", 336, "I", min_version=13),
+        BinaryField("phase_rejection_mask", 340, "I", min_version=13),
+        BinaryField("phase_rejection_count", 344, "I", min_version=13),
+        BinaryField("phase_last_transition_ms", 348, "I", unit="ms", min_version=13),
+        BinaryField("phase_last_transition_vote_mask", 352, "I", min_version=13),
+        BinaryField("phase_inertial_velocity_m_s", 356, "i", scale=0.01, unit="m/s", min_version=13),
+        BinaryField("phase_baro_peak_altitude_m", 360, "i", scale=0.01, unit="m", min_version=13),
+        BinaryField("phase_baro_velocity_m_s", 364, "i", scale=0.01, unit="m/s", min_version=13),
+        BinaryField("phase_required_votes", 368, "B", min_version=13),
+        BinaryField("phase_detector_mode", 369, "B", enum=CROI_PHASE_DETECTOR_MODE, min_version=13),
+        BinaryField("phase_last_transition_reason", 370, "B", enum=CROI_PHASE_TRANSITION_REASON, min_version=13),
+        BinaryField("phase_sensor_health_mask", 371, "B", min_version=13),
     ),
 )
 

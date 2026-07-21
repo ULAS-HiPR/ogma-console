@@ -11,10 +11,10 @@ from typing import Any
 
 
 CROI_MISSION_CONFIG_MAGIC = 0x4F474D43
-CROI_MISSION_CONFIG_SCHEMA_VERSION = 6
+CROI_MISSION_CONFIG_SCHEMA_VERSION = 7
 CROI_MISSION_DEFAULT_LIFTOFF_ACCEL_M_S2 = 20.0
 CROI_FLASH_CAPACITY_BYTES = 16 * 1024 * 1024
-CROI_FLIGHT_RECORD_BYTES = 100
+CROI_FLIGHT_RECORD_BYTES = 144
 CROI_REMOTE_RECORD_BYTES = 104
 
 
@@ -49,6 +49,53 @@ class RecoveryFallbackConfig:
             raise ValueError("main fallback confirmation must be 3 to 100 samples")
         if self.main_backup_enabled and mission.pyro_main_channel is None:
             raise ValueError("main recovery fallback requires an enabled main pyro channel")
+
+
+@dataclass(frozen=True)
+class PhaseDetectionConfig:
+    liftoff_confirm_ms: int = 300
+    liftoff_baro_velocity_m_s: float = 30.0
+    burnout_min_powered_ms: int = 500
+    burnout_accel_threshold_m_s2: float = -1.0
+    burnout_confirm_ms: int = 300
+    burnout_timeout_ms: int = 10000
+    apogee_min_coast_ms: int = 1500
+    apogee_min_altitude_m: int = 20
+    apogee_velocity_threshold_m_s: float = -1.0
+    apogee_confirm_ms: int = 500
+    apogee_single_sensor_confirm_ms: int = 1000
+    apogee_baro_descent_m: float = 3.0
+    apogee_high_speed_lockout_m_s: float = 20.0
+    apogee_timeout_ms: int = 120000
+    sensor_fault_timeout_ms: int = 500
+
+    def validate(self) -> None:
+        if not 100 <= self.liftoff_confirm_ms <= 5000:
+            raise ValueError("liftoff confirmation must be 100 to 5000 ms")
+        if not 1.0 <= self.liftoff_baro_velocity_m_s <= 200.0:
+            raise ValueError("liftoff barometric velocity must be 1 to 200 m/s")
+        if not 100 <= self.burnout_min_powered_ms < self.burnout_timeout_ms <= 120000:
+            raise ValueError("burnout timing must be ordered within 100 to 120000 ms")
+        if not -50.0 <= self.burnout_accel_threshold_m_s2 <= 0.0:
+            raise ValueError("burnout acceleration threshold must be -50 to 0 m/s^2")
+        if not 100 <= self.burnout_confirm_ms <= 5000:
+            raise ValueError("burnout confirmation must be 100 to 5000 ms")
+        if not 500 <= self.apogee_min_coast_ms < self.apogee_timeout_ms <= 600000:
+            raise ValueError("apogee timing must be ordered within 500 to 600000 ms")
+        if not 1 <= self.apogee_min_altitude_m <= 20000:
+            raise ValueError("minimum apogee altitude must be 1 to 20000 m")
+        if not -100.0 <= self.apogee_velocity_threshold_m_s <= 0.0:
+            raise ValueError("apogee velocity threshold must be -100 to 0 m/s")
+        if not 100 <= self.apogee_confirm_ms <= 5000:
+            raise ValueError("apogee confirmation must be 100 to 5000 ms")
+        if not self.apogee_confirm_ms <= self.apogee_single_sensor_confirm_ms <= 10000:
+            raise ValueError("single-sensor apogee confirmation must be no shorter than nominal")
+        if not 0.5 <= self.apogee_baro_descent_m <= 100.0:
+            raise ValueError("apogee barometric descent must be 0.5 to 100 m")
+        if not 1.0 <= self.apogee_high_speed_lockout_m_s <= 300.0:
+            raise ValueError("apogee high-speed lockout must be 1 to 300 m/s")
+        if not 100 <= self.sensor_fault_timeout_ms <= 5000:
+            raise ValueError("sensor fault timeout must be 100 to 5000 ms")
 
 
 @dataclass(frozen=True)
@@ -186,17 +233,21 @@ class MissionConfig:
         self,
         recovery: RecoveryFallbackConfig | None = None,
         logging: LoggingPolicy | None = None,
+        detection: PhaseDetectionConfig | None = None,
     ) -> int:
         recovery = recovery or RecoveryFallbackConfig()
         logging = logging or LoggingPolicy()
+        detection = detection or PhaseDetectionConfig()
         recovery.validate(self)
         logging.validate()
+        detection.validate()
         mission_fields = self.canonical_dict()
         del mission_fields["name"]
         safety_fields = {
             "mission": mission_fields,
             "recovery": asdict(recovery),
             "logging": asdict(logging),
+            "detection": asdict(detection),
         }
         payload = json.dumps(
             safety_fields, sort_keys=True, separators=(",", ":"), ensure_ascii=True
@@ -216,25 +267,28 @@ def build_mission_timeline(
     config: MissionConfig,
     recovery: RecoveryFallbackConfig | None = None,
     logging: LoggingPolicy | None = None,
+    detection: PhaseDetectionConfig | None = None,
 ) -> list[MissionTimelineEvent]:
     """Describe the exact configured flight-state and output sequence."""
     config.validate()
     recovery = recovery or RecoveryFallbackConfig()
     logging = logging or LoggingPolicy()
+    detection = detection or PhaseDetectionConfig()
     recovery.validate(config)
     logging.validate()
+    detection.validate()
     events = [
         MissionTimelineEvent(
             "Boot",
             "CALIBRATING",
-            f"Load locked manifest 0x{config.crc32(recovery, logging):08X}",
+            f"Load locked manifest 0x{config.crc32(recovery, logging, detection):08X}",
             f"magic + schema {CROI_MISSION_CONFIG_SCHEMA_VERSION} + CRC",
         ),
         MissionTimelineEvent(
             f"Vertical accel > {config.liftoff_accel_m_s2:g} m/s^2",
             "READY -> POWERED",
             "Start flight clock",
-            "3 consecutive samples",
+            f"{detection.liftoff_confirm_ms} ms persistence; acceleration or barometric climb fallback",
         ),
     ]
     if config.airbrake_enabled:
@@ -267,16 +321,21 @@ def build_mission_timeline(
     events.extend(
         (
             MissionTimelineEvent(
-                "Vertical accel < 0 m/s^2",
+                f"Vertical accel <= {detection.burnout_accel_threshold_m_s2:g} m/s^2",
                 "POWERED -> COASTING",
                 "Mark motor burnout",
-                "3 consecutive samples",
+                f">= {detection.burnout_min_powered_ms} ms powered; {detection.burnout_confirm_ms} ms persistence; {detection.burnout_timeout_ms} ms fallback",
             ),
             MissionTimelineEvent(
-                "Vertical velocity < 0 m/s",
+                f"Apogee evidence <= {detection.apogee_velocity_threshold_m_s:g} m/s",
                 "COASTING -> DROGUE",
                 _pyro_action("drogue", config.pyro_drogue_channel),
-                _pyro_guard(config.pyro_drogue_channel),
+                (
+                    f">= {detection.apogee_min_coast_ms} ms coast; >= {detection.apogee_min_altitude_m} m; "
+                    f"2-of-3 fused/baro/inertial, degraded dwell {detection.apogee_single_sensor_confirm_ms} ms; "
+                    f"high-speed lockout {detection.apogee_high_speed_lockout_m_s:g} m/s; "
+                    + _pyro_guard(config.pyro_drogue_channel)
+                ),
             ),
             MissionTimelineEvent(
                 f"Altitude < {config.main_deploy_altitude_m} m",
@@ -331,13 +390,16 @@ def render_croi_mission_header(
     config: MissionConfig,
     recovery: RecoveryFallbackConfig | None = None,
     logging: LoggingPolicy | None = None,
+    detection: PhaseDetectionConfig | None = None,
 ) -> str:
     config.validate()
     recovery = recovery or RecoveryFallbackConfig()
     logging = logging or LoggingPolicy()
+    detection = detection or PhaseDetectionConfig()
     recovery.validate(config)
     logging.validate()
-    crc32 = config.crc32(recovery, logging)
+    detection.validate()
+    crc32 = config.crc32(recovery, logging, detection)
     drogue_channel = -1 if config.pyro_drogue_channel is None else config.pyro_drogue_channel
     main_channel = -1 if config.pyro_main_channel is None else config.pyro_main_channel
     liftoff_x100 = round(config.liftoff_accel_m_s2 * 100.0)
@@ -370,6 +432,21 @@ def render_croi_mission_header(
             f"#define CROI_MISSION_MAIN_BACKUP_MIN_ALTITUDE_M {recovery.min_altitude_m}U",
             f"#define CROI_MISSION_MAIN_BACKUP_MAX_ALTITUDE_M {recovery.max_altitude_m}U",
             f"#define CROI_MISSION_MAIN_BACKUP_REQUIRED_SAMPLES {recovery.required_samples}U",
+            f"#define CROI_PHASE_LIFTOFF_CONFIRM_MS {detection.liftoff_confirm_ms}U",
+            f"#define CROI_PHASE_LIFTOFF_BARO_VELOCITY_M_S_X100 {round(detection.liftoff_baro_velocity_m_s * 100.0)}U",
+            f"#define CROI_PHASE_BURNOUT_MIN_POWERED_MS {detection.burnout_min_powered_ms}U",
+            f"#define CROI_PHASE_BURNOUT_ACCEL_M_S2_X100 {round(detection.burnout_accel_threshold_m_s2 * 100.0)}",
+            f"#define CROI_PHASE_BURNOUT_CONFIRM_MS {detection.burnout_confirm_ms}U",
+            f"#define CROI_PHASE_BURNOUT_TIMEOUT_MS {detection.burnout_timeout_ms}U",
+            f"#define CROI_PHASE_APOGEE_MIN_COAST_MS {detection.apogee_min_coast_ms}U",
+            f"#define CROI_PHASE_APOGEE_MIN_ALTITUDE_M {detection.apogee_min_altitude_m}U",
+            f"#define CROI_PHASE_APOGEE_VELOCITY_M_S_X100 {round(detection.apogee_velocity_threshold_m_s * 100.0)}",
+            f"#define CROI_PHASE_APOGEE_CONFIRM_MS {detection.apogee_confirm_ms}U",
+            f"#define CROI_PHASE_APOGEE_SINGLE_SENSOR_CONFIRM_MS {detection.apogee_single_sensor_confirm_ms}U",
+            f"#define CROI_PHASE_APOGEE_BARO_DESCENT_M_X100 {round(detection.apogee_baro_descent_m * 100.0)}U",
+            f"#define CROI_PHASE_APOGEE_HIGH_SPEED_LOCKOUT_M_S_X100 {round(detection.apogee_high_speed_lockout_m_s * 100.0)}U",
+            f"#define CROI_PHASE_APOGEE_TIMEOUT_MS {detection.apogee_timeout_ms}U",
+            f"#define CROI_PHASE_SENSOR_FAULT_TIMEOUT_MS {detection.sensor_fault_timeout_ms}U",
             f"#define CROI_LOGGING_FLIGHT_SAMPLE_PERIOD_MS {logging.flight_sample_period_ms}U",
             f"#define CROI_LOGGING_MINIMUM_FLIGHT_MS {logging.minimum_flight_ms}U",
             f"#define CROI_LOGGING_POST_LANDING_MS {logging.post_landing_ms}U",
@@ -411,6 +488,30 @@ def render_croi_mission_header(
             "#if CROI_MISSION_MAIN_BACKUP_REQUIRED_SAMPLES < 3U || CROI_MISSION_MAIN_BACKUP_REQUIRED_SAMPLES > 100U",
             "#error \"main backup confirmation sample count is invalid\"",
             "#endif",
+            "#if CROI_PHASE_LIFTOFF_CONFIRM_MS < 100U || CROI_PHASE_LIFTOFF_CONFIRM_MS > 5000U",
+            "#error \"invalid liftoff confirmation time\"",
+            "#endif",
+            "#if CROI_PHASE_BURNOUT_MIN_POWERED_MS < 100U || CROI_PHASE_BURNOUT_MIN_POWERED_MS >= CROI_PHASE_BURNOUT_TIMEOUT_MS",
+            "#error \"invalid burnout timing\"",
+            "#endif",
+            "#if CROI_PHASE_BURNOUT_ACCEL_M_S2_X100 > 0 || CROI_PHASE_BURNOUT_ACCEL_M_S2_X100 < -5000",
+            "#error \"invalid burnout acceleration threshold\"",
+            "#endif",
+            "#if CROI_PHASE_APOGEE_MIN_COAST_MS < 500U || CROI_PHASE_APOGEE_MIN_COAST_MS >= CROI_PHASE_APOGEE_TIMEOUT_MS",
+            "#error \"invalid apogee timing\"",
+            "#endif",
+            "#if CROI_PHASE_APOGEE_VELOCITY_M_S_X100 > 0 || CROI_PHASE_APOGEE_VELOCITY_M_S_X100 < -10000",
+            "#error \"invalid apogee velocity threshold\"",
+            "#endif",
+            "#if CROI_PHASE_APOGEE_CONFIRM_MS < 100U || CROI_PHASE_APOGEE_CONFIRM_MS > 5000U",
+            "#error \"invalid apogee confirmation time\"",
+            "#endif",
+            "#if CROI_PHASE_APOGEE_SINGLE_SENSOR_CONFIRM_MS < CROI_PHASE_APOGEE_CONFIRM_MS || CROI_PHASE_APOGEE_SINGLE_SENSOR_CONFIRM_MS > 10000U",
+            "#error \"invalid degraded apogee confirmation time\"",
+            "#endif",
+            "#if CROI_PHASE_SENSOR_FAULT_TIMEOUT_MS < 100U || CROI_PHASE_SENSOR_FAULT_TIMEOUT_MS > 5000U",
+            "#error \"invalid sensor fault timeout\"",
+            "#endif",
             "#if CROI_LOGGING_FLIGHT_SAMPLE_PERIOD_MS < 20U || CROI_LOGGING_FLIGHT_SAMPLE_PERIOD_MS > 1000U",
             "#error \"flight logging period is invalid\"",
             "#endif",
@@ -431,10 +532,11 @@ def write_croi_mission_header(
     config: MissionConfig,
     recovery: RecoveryFallbackConfig | None = None,
     logging: LoggingPolicy | None = None,
+    detection: PhaseDetectionConfig | None = None,
 ) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(render_croi_mission_header(config, recovery, logging), encoding="utf-8")
+    temporary.write_text(render_croi_mission_header(config, recovery, logging, detection), encoding="utf-8")
     temporary.replace(path)
     return path
 
@@ -444,14 +546,16 @@ def save_mission_json(directory: Path, config: MissionConfig) -> Path:
     timestamp = datetime.now(timezone.utc)
     recovery = RecoveryFallbackConfig()
     logging = LoggingPolicy()
+    detection = PhaseDetectionConfig()
     payload = {
         "schema_version": CROI_MISSION_CONFIG_SCHEMA_VERSION,
-        "mission_crc32": f"{config.crc32(recovery, logging):08x}",
+        "mission_crc32": f"{config.crc32(recovery, logging, detection):08x}",
         "mission": config.canonical_dict(),
         "recovery": asdict(recovery),
         "logging": asdict(logging),
+        "detection": asdict(detection),
     }
-    path = directory / f"mission_{timestamp.strftime('%Y%m%dT%H%M%SZ')}_{config.crc32(recovery, logging):08x}.json"
+    path = directory / f"mission_{timestamp.strftime('%Y%m%dT%H%M%SZ')}_{config.crc32(recovery, logging, detection):08x}.json"
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     temporary.replace(path)
@@ -466,24 +570,27 @@ def save_mission_flash_record(
     status: dict[str, object],
     recovery: RecoveryFallbackConfig | None = None,
     logging: LoggingPolicy | None = None,
+    detection: PhaseDetectionConfig | None = None,
 ) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc)
     recovery = recovery or RecoveryFallbackConfig()
     logging = logging or LoggingPolicy()
+    detection = detection or PhaseDetectionConfig()
     header = header_path.read_bytes()
     payload = {
         "flashed_at_utc": timestamp.isoformat(),
         "env": env,
-        "mission_crc32": f"{config.crc32(recovery, logging):08x}",
+        "mission_crc32": f"{config.crc32(recovery, logging, detection):08x}",
         "mission": config.canonical_dict(),
         "recovery": asdict(recovery),
         "logging": asdict(logging),
+        "detection": asdict(detection),
         "header": str(header_path),
         "header_sha256": hashlib.sha256(header).hexdigest(),
         "status": status,
     }
-    path = directory / f"mission_flash_{timestamp.strftime('%Y%m%dT%H%M%SZ')}_{config.crc32(recovery, logging):08x}.json"
+    path = directory / f"mission_flash_{timestamp.strftime('%Y%m%dT%H%M%SZ')}_{config.crc32(recovery, logging, detection):08x}.json"
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     temporary.replace(path)
@@ -493,7 +600,7 @@ def save_mission_flash_record(
 def load_mission_json(path: Path) -> MissionConfig:
     payload = json.loads(path.read_text(encoding="utf-8"))
     schema_version = int(payload.get("schema_version", 0))
-    if schema_version not in (1, 2, 3, 4, 5, CROI_MISSION_CONFIG_SCHEMA_VERSION):
+    if schema_version not in (1, 2, 3, 4, 5, 6, CROI_MISSION_CONFIG_SCHEMA_VERSION):
         raise ValueError("unsupported mission JSON schema")
     mission = payload.get("mission")
     if not isinstance(mission, dict):
@@ -522,9 +629,31 @@ def load_mission_json(path: Path) -> MissionConfig:
             logging_values = payload.get("logging", {})
             if not isinstance(logging_values, dict):
                 raise ValueError("mission JSON logging policy is invalid")
-            if schema_version >= 6:
+            if schema_version >= 7:
                 logging = LoggingPolicy(**logging_values)
-                expected_crc = config.crc32(recovery, logging)
+                detection_values = payload.get("detection", {})
+                if not isinstance(detection_values, dict):
+                    raise ValueError("mission JSON detection config is invalid")
+                expected_crc = config.crc32(
+                    recovery,
+                    logging,
+                    PhaseDetectionConfig(**detection_values),
+                )
+            elif schema_version >= 6:
+                mission_fields = config.canonical_dict()
+                del mission_fields["name"]
+                expected_crc = zlib.crc32(
+                    json.dumps(
+                        {
+                            "mission": mission_fields,
+                            "recovery": recovery_values,
+                            "logging": logging_values,
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        ensure_ascii=True,
+                    ).encode("ascii")
+                ) & 0xFFFFFFFF
             else:
                 mission_fields = config.canonical_dict()
                 del mission_fields["name"]

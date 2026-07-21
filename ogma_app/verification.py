@@ -9,6 +9,7 @@ from .mission_config import (
     CROI_MISSION_CONFIG_SCHEMA_VERSION,
     LoggingPolicy,
     MissionConfig,
+    PhaseDetectionConfig,
     RecoveryFallbackConfig,
 )
 from .flight_manifest import RadioPolicy
@@ -54,6 +55,7 @@ def verify_croi_mission(
     status: dict[str, Any],
     recovery: RecoveryFallbackConfig | None = None,
     logging: LoggingPolicy | None = None,
+    detection: PhaseDetectionConfig | None = None,
 ) -> ConfigVerification:
     return ConfigVerification(
         "Croí mission",
@@ -64,7 +66,11 @@ def verify_croi_mission(
                 CROI_MISSION_CONFIG_SCHEMA_VERSION,
                 int(status.get("mission_config_schema_version", 0)),
             ),
-            VerificationItem("crc32", config.crc32(recovery, logging), int(status.get("mission_config_crc32", 0))),
+            VerificationItem(
+                "crc32",
+                config.crc32(recovery, logging, detection),
+                int(status.get("mission_config_crc32", 0)),
+            ),
         ),
     )
 

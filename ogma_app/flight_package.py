@@ -59,7 +59,10 @@ def build_flight_package(
             }
         ),
         "config/croi_mission_config.h": render_croi_mission_header(
-            manifest.mission, manifest.recovery, manifest.logging
+            manifest.mission,
+            manifest.recovery,
+            manifest.logging,
+            manifest.detection,
         ).encode("ascii"),
         "config/lamh_safety_config.h": render_lamh_safety_header(manifest.lamh_safety).encode("ascii"),
         "config/teachtaire_radio_config.h": render_teachtaire_radio_header(manifest.radio).encode("ascii"),

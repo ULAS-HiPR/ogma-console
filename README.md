@@ -59,6 +59,8 @@ Lamh's four failsafe angles are part of the same manifest. They can be edited un
 
 Replay does not maintain a second Python implementation of flight behavior. The console compiles a small native harness against Croi's real `FlightPhaseLogic` and `AirbrakeLogic` headers, then feeds it timestamped acceleration, velocity, and altitude samples. This keeps desktop replay behavior tied to the code that is built into Croi.
 
+Mission schema 7 makes phase detection explicit. Liftoff and burnout use time-persistent evidence; apogee uses fused, barometric, and inertial evidence with minimum-time/altitude gates, high-speed lockout, longer single-sensor fallback, and an altitude-gated timeout. Replay CSVs may also provide `barometric_altitude_m`, `imu_valid`, and `baro_valid` columns for fault injection. Croi records the active votes, gates, rejections, detector mode, and transition reason in status and flash data. The full contract and its limits are documented in [Croi flight-phase detection](docs/flight-phase-detection.md).
+
 ### Flight packages
 
 A flight package is a ZIP archive containing:

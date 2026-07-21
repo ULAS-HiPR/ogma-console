@@ -55,6 +55,7 @@ from .lamh_config import LamhSafetyConfig, load_lamh_safety_config
 from .mission_config import (
     CROI_MISSION_CONFIG_SCHEMA_VERSION,
     MissionConfig,
+    PhaseDetectionConfig,
     RecoveryFallbackConfig,
     build_mission_timeline,
 )
@@ -98,6 +99,20 @@ FLIGHT_STATE_NAMES = {
     4: "drogue",
     5: "main",
     6: "landed",
+}
+PHASE_TRANSITION_REASON_NAMES = {
+    0: "none",
+    1: "liftoff acceleration",
+    2: "liftoff barometric climb",
+    3: "burnout acceleration",
+    4: "burnout timeout",
+    5: "apogee voting",
+    6: "apogee barometer fallback",
+    7: "apogee inertial fallback",
+    8: "apogee timeout",
+    9: "main altitude",
+    10: "main fast descent",
+    11: "landed",
 }
 
 
@@ -327,6 +342,7 @@ class OgmaApp(tk.Tk):
         self.lamh_safe_angles = [tk.IntVar(value=angle) for angle in self.lamh_safety_config.angles_deg]
         self.flight_manifest = FlightManifest.defaults(self.lamh_safety_config)
         self._apply_mission_config(self.flight_manifest.mission)
+        self._apply_detection_config(self.flight_manifest.detection)
         self._apply_recovery_config(self.flight_manifest.recovery)
         self._apply_logging_config(self.flight_manifest.logging)
         self._apply_radio_config(self.flight_manifest.radio)
@@ -788,14 +804,40 @@ class OgmaApp(tk.Tk):
         )
         self.log_text.grid(row=0, column=0, sticky="nsew")
 
-        self.mission_tab = ttk.Frame(self.notebook, padding=10)
+        self.mission_tab = ttk.Frame(self.notebook)
         self.mission_tab.columnconfigure(0, weight=1)
-        self.mission_tab.columnconfigure(1, weight=1)
-        self.mission_tab.rowconfigure(5, weight=1)
+        self.mission_tab.rowconfigure(0, weight=1)
         self.notebook.add(self.mission_tab, text="Mission")
 
-        mission_warning = ttk.Label(
+        mission_canvas = tk.Canvas(
             self.mission_tab,
+            bg="#f4f7fb",
+            highlightthickness=0,
+            borderwidth=0,
+        )
+        mission_scrollbar = ttk.Scrollbar(
+            self.mission_tab,
+            orient="vertical",
+            command=mission_canvas.yview,
+        )
+        mission_canvas.configure(yscrollcommand=mission_scrollbar.set)
+        mission_canvas.grid(row=0, column=0, sticky="nsew")
+        mission_scrollbar.grid(row=0, column=1, sticky="ns")
+        mission_content = ttk.Frame(mission_canvas, padding=10)
+        mission_content.columnconfigure(0, weight=1)
+        mission_content.columnconfigure(1, weight=1)
+        mission_window = mission_canvas.create_window((0, 0), window=mission_content, anchor="nw")
+        mission_content.bind(
+            "<Configure>",
+            lambda _event: mission_canvas.configure(scrollregion=mission_canvas.bbox("all")),
+        )
+        mission_canvas.bind(
+            "<Configure>",
+            lambda event: mission_canvas.itemconfigure(mission_window, width=event.width),
+        )
+
+        mission_warning = ttk.Label(
+            mission_content,
             text=(
                 "Airbrake uses timed deploy/stow with physical arm and command lease.  "
                 "Rev1 pyro missions require external RBF, accepted-risk Pleasc firmware, continuity, and live Croí commands."
@@ -805,23 +847,27 @@ class OgmaApp(tk.Tk):
         )
         mission_warning.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 10))
 
-        mission_name = ttk.Entry(self.mission_tab, textvariable=self.mission_name)
-        ttk.Label(self.mission_tab, text="Mission Name").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(0, 8))
+        mission_name = ttk.Entry(mission_content, textvariable=self.mission_name)
+        ttk.Label(mission_content, text="Mission Name").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(0, 8))
         mission_name.grid(row=1, column=1, sticky="ew", pady=(0, 8))
 
-        mission_sections = ttk.Notebook(self.mission_tab)
+        mission_sections = ttk.Notebook(mission_content)
         self._bind_notebook_clicks(mission_sections)
         flight = ttk.Frame(mission_sections, padding=8)
         recovery = ttk.Frame(mission_sections, padding=8)
+        detection = ttk.Frame(mission_sections, padding=8)
         airbrake = ttk.Frame(mission_sections, padding=8)
-        actions = ttk.Frame(self.mission_tab)
+        actions = ttk.Frame(mission_content)
         mission_sections.add(flight, text="Flight")
+        mission_sections.add(detection, text="Detection")
         mission_sections.add(recovery, text="Recovery")
         mission_sections.add(airbrake, text="Airbrake")
         mission_sections.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 10))
         actions.grid(row=3, column=0, columnspan=2, sticky="ew")
         for frame in (flight, recovery, airbrake):
             frame.columnconfigure(1, weight=1)
+        detection.columnconfigure(1, weight=1)
+        detection.columnconfigure(4, weight=1)
 
         ttk.Label(flight, text="Liftoff Threshold").grid(row=0, column=0, sticky="w", padx=8, pady=6)
         liftoff = ttk.Spinbox(flight, from_=1.0, to=200.0, increment=0.1, textvariable=self.mission_liftoff_accel)
@@ -844,6 +890,41 @@ class OgmaApp(tk.Tk):
         main_altitude = ttk.Spinbox(flight, from_=0, to=20000, increment=10, textvariable=self.mission_main_altitude)
         main_altitude.grid(row=2, column=1, sticky="ew", padx=8, pady=6)
         ttk.Label(flight, text="m", style="Muted.TLabel").grid(row=2, column=2, sticky="w", padx=(0, 8), pady=6)
+
+        detection_widgets: list[tk.Widget] = []
+        detection_fields = (
+            ("Liftoff Confirm", self.phase_liftoff_confirm, 100, 5000, 100, "ms"),
+            ("Baro Liftoff", self.phase_liftoff_baro_velocity, 1.0, 200.0, 1.0, "m/s"),
+            ("Min Powered", self.phase_burnout_min_powered, 100, 120000, 100, "ms"),
+            ("Burnout Accel", self.phase_burnout_accel, -50.0, 0.0, 0.1, "m/s^2"),
+            ("Burnout Confirm", self.phase_burnout_confirm, 100, 5000, 100, "ms"),
+            ("Burnout Timeout", self.phase_burnout_timeout, 100, 120000, 100, "ms"),
+            ("Min Coast", self.phase_apogee_min_coast, 500, 600000, 100, "ms"),
+            ("Min Apogee Alt", self.phase_apogee_min_altitude, 1, 20000, 1, "m"),
+            ("Apogee Velocity", self.phase_apogee_velocity, -100.0, 0.0, 0.1, "m/s"),
+            ("Apogee Confirm", self.phase_apogee_confirm, 100, 5000, 100, "ms"),
+            ("Degraded Confirm", self.phase_apogee_single_confirm, 100, 10000, 100, "ms"),
+            ("Baro Descent", self.phase_apogee_baro_descent, 0.5, 100.0, 0.5, "m"),
+            ("Speed Lockout", self.phase_apogee_speed_lockout, 1.0, 300.0, 1.0, "m/s"),
+            ("Apogee Timeout", self.phase_apogee_timeout, 500, 600000, 1000, "ms"),
+            ("Sensor Fault", self.phase_sensor_fault_timeout, 100, 5000, 100, "ms"),
+        )
+        for index, (label, variable, minimum, maximum, increment, unit) in enumerate(detection_fields):
+            side = 0 if index < 8 else 3
+            row = index if index < 8 else index - 8
+            ttk.Label(detection, text=label).grid(row=row, column=side, sticky="w", padx=8, pady=4)
+            widget = ttk.Spinbox(
+                detection,
+                from_=minimum,
+                to=maximum,
+                increment=increment,
+                textvariable=variable,
+            )
+            widget.grid(row=row, column=side + 1, sticky="ew", padx=8, pady=4)
+            ttk.Label(detection, text=unit, style="Muted.TLabel").grid(
+                row=row, column=side + 2, sticky="w", padx=(0, 8), pady=4
+            )
+            detection_widgets.append(widget)
 
         ttk.Label(recovery, text="Drogue Channel").grid(row=0, column=0, sticky="w", padx=8, pady=6)
         drogue_channel = ttk.Combobox(recovery, values=PYRO_CHANNEL_VALUES, textvariable=self.mission_drogue_channel, state="readonly")
@@ -984,11 +1065,11 @@ class OgmaApp(tk.Tk):
             actions.columnconfigure(column, weight=1)
 
         self.mission_audit = tk.StringVar(value="")
-        ttk.Label(self.mission_tab, textvariable=self.mission_audit, style="Muted.TLabel").grid(
+        ttk.Label(mission_content, textvariable=self.mission_audit, style="Muted.TLabel").grid(
             row=4, column=0, columnspan=2, sticky="ew", pady=(10, 6)
         )
         self.mission_timeline_tree = ttk.Treeview(
-            self.mission_tab,
+            mission_content,
             columns=("state", "action", "guard"),
             show="tree headings",
             height=8,
@@ -1002,11 +1083,22 @@ class OgmaApp(tk.Tk):
         self.mission_timeline_tree.column("action", width=280)
         self.mission_timeline_tree.column("guard", width=360)
         self.mission_timeline_tree.grid(row=5, column=0, columnspan=2, sticky="nsew")
+        def scroll_mission(event: tk.Event) -> str:
+            mission_canvas.yview_scroll(-3 if event.delta > 0 else 3, "units")
+            return "break"
+
+        def bind_mission_scroll(widget: tk.Widget) -> None:
+            widget.bind("<MouseWheel>", scroll_mission, add="+")
+            for child in widget.winfo_children():
+                bind_mission_scroll(child)
+
+        bind_mission_scroll(mission_content)
         self.mission_readonly_widgets = [drogue_channel, main_channel]
         self.mission_widgets = [
             mission_name, liftoff, imu_axis, imu_sign, main_altitude, drogue_channel, main_channel, drogue_delay,
             main_backup, main_backup_delay, main_backup_speed, main_backup_min_altitude,
             main_backup_max_altitude, main_backup_samples,
+            *detection_widgets,
             airbrake_enabled, airbrake_channel, airbrake_retracted, airbrake_max,
             airbrake_delay, airbrake_stow_delay, airbrake_watchdog, *mission_safety_widgets,
             mission_save, mission_load,
@@ -1042,6 +1134,21 @@ class OgmaApp(tk.Tk):
             self.mission_main_backup_min_altitude,
             self.mission_main_backup_max_altitude,
             self.mission_main_backup_required_samples,
+            self.phase_liftoff_confirm,
+            self.phase_liftoff_baro_velocity,
+            self.phase_burnout_min_powered,
+            self.phase_burnout_accel,
+            self.phase_burnout_confirm,
+            self.phase_burnout_timeout,
+            self.phase_apogee_min_coast,
+            self.phase_apogee_min_altitude,
+            self.phase_apogee_velocity,
+            self.phase_apogee_confirm,
+            self.phase_apogee_single_confirm,
+            self.phase_apogee_baro_descent,
+            self.phase_apogee_speed_lockout,
+            self.phase_apogee_timeout,
+            self.phase_sensor_fault_timeout,
             self.radio_core_period,
             self.radio_gps_period,
             self.radio_slow_period,
@@ -1636,6 +1743,31 @@ class OgmaApp(tk.Tk):
             else:
                 variable.set(value)
 
+    def _apply_detection_config(self, config: PhaseDetectionConfig) -> None:
+        values = (
+            ("phase_liftoff_confirm", tk.IntVar, config.liftoff_confirm_ms),
+            ("phase_liftoff_baro_velocity", tk.StringVar, f"{config.liftoff_baro_velocity_m_s:g}"),
+            ("phase_burnout_min_powered", tk.IntVar, config.burnout_min_powered_ms),
+            ("phase_burnout_accel", tk.StringVar, f"{config.burnout_accel_threshold_m_s2:g}"),
+            ("phase_burnout_confirm", tk.IntVar, config.burnout_confirm_ms),
+            ("phase_burnout_timeout", tk.IntVar, config.burnout_timeout_ms),
+            ("phase_apogee_min_coast", tk.IntVar, config.apogee_min_coast_ms),
+            ("phase_apogee_min_altitude", tk.IntVar, config.apogee_min_altitude_m),
+            ("phase_apogee_velocity", tk.StringVar, f"{config.apogee_velocity_threshold_m_s:g}"),
+            ("phase_apogee_confirm", tk.IntVar, config.apogee_confirm_ms),
+            ("phase_apogee_single_confirm", tk.IntVar, config.apogee_single_sensor_confirm_ms),
+            ("phase_apogee_baro_descent", tk.StringVar, f"{config.apogee_baro_descent_m:g}"),
+            ("phase_apogee_speed_lockout", tk.StringVar, f"{config.apogee_high_speed_lockout_m_s:g}"),
+            ("phase_apogee_timeout", tk.IntVar, config.apogee_timeout_ms),
+            ("phase_sensor_fault_timeout", tk.IntVar, config.sensor_fault_timeout_ms),
+        )
+        for name, variable_type, value in values:
+            variable = getattr(self, name, None)
+            if variable is None:
+                setattr(self, name, variable_type(value=value))
+            else:
+                variable.set(value)
+
     def _apply_radio_config(self, config: RadioPolicy) -> None:
         values = (
             ("radio_core_period", config.core_period_ms),
@@ -1703,6 +1835,27 @@ class OgmaApp(tk.Tk):
             pyro_main_channel=self._mission_channel(self.mission_main_channel.get()),
         )
 
+    def _phase_detection_from_ui(self) -> PhaseDetectionConfig:
+        config = PhaseDetectionConfig(
+            liftoff_confirm_ms=self.phase_liftoff_confirm.get(),
+            liftoff_baro_velocity_m_s=float(self.phase_liftoff_baro_velocity.get()),
+            burnout_min_powered_ms=self.phase_burnout_min_powered.get(),
+            burnout_accel_threshold_m_s2=float(self.phase_burnout_accel.get()),
+            burnout_confirm_ms=self.phase_burnout_confirm.get(),
+            burnout_timeout_ms=self.phase_burnout_timeout.get(),
+            apogee_min_coast_ms=self.phase_apogee_min_coast.get(),
+            apogee_min_altitude_m=self.phase_apogee_min_altitude.get(),
+            apogee_velocity_threshold_m_s=float(self.phase_apogee_velocity.get()),
+            apogee_confirm_ms=self.phase_apogee_confirm.get(),
+            apogee_single_sensor_confirm_ms=self.phase_apogee_single_confirm.get(),
+            apogee_baro_descent_m=float(self.phase_apogee_baro_descent.get()),
+            apogee_high_speed_lockout_m_s=float(self.phase_apogee_speed_lockout.get()),
+            apogee_timeout_ms=self.phase_apogee_timeout.get(),
+            sensor_fault_timeout_ms=self.phase_sensor_fault_timeout.get(),
+        )
+        config.validate()
+        return config
+
     def _manifest_from_ui(self) -> FlightManifest:
         recovery = RecoveryFallbackConfig(
             main_backup_enabled=self.mission_main_backup_enabled.get(),
@@ -1716,6 +1869,7 @@ class OgmaApp(tk.Tk):
             self.flight_manifest,
             mission=self._mission_config_from_ui(),
             lamh_safety=LamhSafetyConfig.from_values(angle.get() for angle in self.lamh_safe_angles),
+            detection=self._phase_detection_from_ui(),
             recovery=recovery,
             logging=self._logging_policy_from_ui(),
             radio=self._radio_policy_from_ui(),
@@ -1727,6 +1881,7 @@ class OgmaApp(tk.Tk):
         manifest.validate()
         self.flight_manifest = manifest
         self._apply_mission_config(manifest.mission)
+        self._apply_detection_config(manifest.detection)
         self._apply_recovery_config(manifest.recovery)
         self._apply_logging_config(manifest.logging)
         self._apply_radio_config(manifest.radio)
@@ -1754,9 +1909,14 @@ class OgmaApp(tk.Tk):
         ready_state = f"BLOCKED: {safety_error}" if safety_error else "VALID"
         audit.set(
             f"{ready_state} | schema {CROI_MISSION_CONFIG_SCHEMA_VERSION} | "
-            f"CRC 0x{config.crc32(manifest.recovery, manifest.logging):08X} | manifest {manifest.sha256()[:12]} | {pyro_state}"
+            f"CRC 0x{config.crc32(manifest.recovery, manifest.logging, manifest.detection):08X} | manifest {manifest.sha256()[:12]} | {pyro_state}"
         )
-        for event in build_mission_timeline(config, manifest.recovery, manifest.logging):
+        for event in build_mission_timeline(
+            config,
+            manifest.recovery,
+            manifest.logging,
+            manifest.detection,
+        ):
             tree.insert(
                 "",
                 "end",
@@ -2176,7 +2336,7 @@ class OgmaApp(tk.Tk):
             return
         if not messagebox.askyesno(
             "Flash Locked Mission",
-            f"Build and flash Croí flight firmware with mission CRC 0x{config.crc32(manifest.recovery, manifest.logging):08x} and manifest {manifest.sha256()[:12]}?",
+            f"Build and flash Croí flight firmware with mission CRC 0x{config.crc32(manifest.recovery, manifest.logging, manifest.detection):08x} and manifest {manifest.sha256()[:12]}?",
         ):
             return
         self.flight_manifest = manifest
@@ -2190,6 +2350,7 @@ class OgmaApp(tk.Tk):
                 env,
                 manifest.recovery,
                 manifest.logging,
+                manifest.detection,
             ),
         )
 
@@ -2616,10 +2777,12 @@ class OgmaApp(tk.Tk):
             self.flight_manifest = replace(
                 self.flight_manifest,
                 mission=result.config,
+                detection=result.detection,
                 recovery=result.recovery,
                 logging=result.logging,
             )
             self._apply_mission_config(result.config)
+            self._apply_detection_config(result.detection)
             self._show_status("croi", result.status, result.env)
             self._log_verification(result.verification)
             self.log(f"croi mission config audit: {result.record_path}")
@@ -2889,7 +3052,12 @@ class OgmaApp(tk.Tk):
         for item in self.recovery_tree.get_children():
             self.recovery_tree.delete(item)
         for point in session.result.transitions:
-            event = "main backup" if point.main_backup else "state transition"
+            event = PHASE_TRANSITION_REASON_NAMES.get(
+                point.transition_reason,
+                f"reason {point.transition_reason}",
+            )
+            if point.main_backup:
+                event = "main fast descent"
             self.recovery_tree.insert(
                 "",
                 "end",

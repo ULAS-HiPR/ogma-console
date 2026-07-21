@@ -77,7 +77,7 @@ def _mission_checks(manifest: FlightManifest) -> list[PreflightCheck]:
             "mission",
             "Croí mission CRC",
             "pass",
-            f"0x{mission.crc32(manifest.recovery, manifest.logging):08X}",
+            f"0x{mission.crc32(manifest.recovery, manifest.logging, manifest.detection):08X}",
             "generated",
             "manifest",
         )
@@ -160,12 +160,39 @@ def _croi_checks(manifest: FlightManifest, evidence: StatusEvidence | None) -> l
             "SWD",
         )
     )
+    if "phase_detector_mode" in status:
+        detector_mode = int(status.get("phase_detector_mode", -1))
+        sensor_health = int(status.get("phase_sensor_health_mask", 0))
+        checks.append(
+            _check(
+                "Croí",
+                "phase detector mode",
+                "pass" if detector_mode == 0 else "fail",
+                str(detector_mode),
+                "0 (IMU + barometer)",
+                "SWD",
+            )
+        )
+        checks.append(
+            _check(
+                "Croí",
+                "phase sensor health",
+                "pass" if sensor_health & 0x03 == 0x03 else "fail",
+                f"0x{sensor_health:02X}",
+                "IMU + barometer healthy",
+                "SWD",
+            )
+        )
     for field, expected, label, display in (
         ("mission_config_magic", CROI_MISSION_CONFIG_MAGIC, "mission magic", "hex"),
         ("mission_config_schema_version", CROI_MISSION_CONFIG_SCHEMA_VERSION, "mission schema", "int"),
         (
             "mission_config_crc32",
-            manifest.mission.crc32(manifest.recovery, manifest.logging),
+            manifest.mission.crc32(
+                manifest.recovery,
+                manifest.logging,
+                manifest.detection,
+            ),
             "mission CRC",
             "hex",
         ),

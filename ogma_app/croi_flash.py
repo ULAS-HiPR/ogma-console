@@ -20,7 +20,8 @@ PAYLOAD_FLIGHT_DATA = 1
 PAYLOAD_SECONDARY_FLIGHT_DATA = 2
 
 HEADER = struct.Struct("<IHHIIIHHIIII")
-FLIGHT_DATA_SIZE = 60
+FLIGHT_DATA_SIZE_V1 = 60
+FLIGHT_DATA_SIZE_V2 = 104
 SECONDARY_DATA_SIZE_V1 = 48
 SECONDARY_DATA_SIZE_V2 = 64
 
@@ -70,11 +71,12 @@ def _parse_header(blob: bytes, offset: int) -> dict[str, int]:
 
 
 def parse_flight_data(payload: bytes, payload_version: int = 1) -> dict[str, Any]:
-    if len(payload) < FLIGHT_DATA_SIZE:
-        raise ValueError(f"flight_data too short: {len(payload)} < {FLIGHT_DATA_SIZE}")
+    required_size = FLIGHT_DATA_SIZE_V2 if payload_version >= 2 else FLIGHT_DATA_SIZE_V1
+    if len(payload) < required_size:
+        raise ValueError(f"flight_data too short: {len(payload)} < {required_size}")
     acceleration = struct.unpack_from("<f", payload, 12)[0]
     acceleration_m_s2 = acceleration if payload_version >= 1 else acceleration * 9.80665
-    return {
+    decoded = {
         "time_ms": struct.unpack_from("<I", payload, 0)[0],
         "prediction_altitude_m": struct.unpack_from("<f", payload, 4)[0],
         "prediction_velocity_m_s": struct.unpack_from("<f", payload, 8)[0],
@@ -93,6 +95,56 @@ def parse_flight_data(payload: bytes, payload_version: int = 1) -> dict[str, Any
         "imu_temperature": struct.unpack_from("<i", payload, 52)[0],
         "state": struct.unpack_from("<h", payload, 56)[0],
     }
+    if payload_version >= 2:
+        transition_reason = struct.unpack_from("<B", payload, 102)[0]
+        detector_mode = struct.unpack_from("<B", payload, 101)[0]
+        decoded.update(
+            {
+                "phase_candidate_mask": struct.unpack_from("<I", payload, 60)[0],
+                "phase_confirmed_vote_mask": struct.unpack_from("<I", payload, 64)[0],
+                "phase_gate_mask": struct.unpack_from("<I", payload, 68)[0],
+                "phase_rejection_mask": struct.unpack_from("<I", payload, 72)[0],
+                "phase_rejection_count": struct.unpack_from("<I", payload, 76)[0],
+                "phase_last_transition_ms": struct.unpack_from("<I", payload, 80)[0],
+                "phase_last_transition_vote_mask": struct.unpack_from("<I", payload, 84)[0],
+                "phase_inertial_velocity_m_s": struct.unpack_from("<i", payload, 88)[0] / 100.0,
+                "phase_baro_peak_altitude_m": struct.unpack_from("<i", payload, 92)[0] / 100.0,
+                "phase_baro_velocity_m_s": struct.unpack_from("<i", payload, 96)[0] / 100.0,
+                "phase_required_votes": struct.unpack_from("<B", payload, 100)[0],
+                "phase_detector_mode": detector_mode,
+                "phase_detector_mode_name": _phase_detector_mode_name(detector_mode),
+                "phase_last_transition_reason": transition_reason,
+                "phase_last_transition_reason_name": _phase_transition_reason_name(transition_reason),
+                "phase_sensor_health_mask": struct.unpack_from("<B", payload, 103)[0],
+            }
+        )
+    return decoded
+
+
+def _phase_detector_mode_name(value: int) -> str:
+    return {
+        0: "imu+barometer",
+        1: "barometer-only",
+        2: "imu-only",
+        3: "no-sensors",
+    }.get(value, f"unknown-{value}")
+
+
+def _phase_transition_reason_name(value: int) -> str:
+    return {
+        0: "none",
+        1: "liftoff-acceleration",
+        2: "liftoff-barometric-climb",
+        3: "burnout-acceleration",
+        4: "burnout-timeout",
+        5: "apogee-voting",
+        6: "apogee-barometer-fallback",
+        7: "apogee-inertial-fallback",
+        8: "apogee-timeout",
+        9: "main-altitude",
+        10: "main-fast-descent",
+        11: "landed",
+    }.get(value, f"unknown-{value}")
 
 
 def parse_secondary_data(payload: bytes, payload_version: int = 1) -> dict[str, Any]:
@@ -192,7 +244,8 @@ def parse_croi_flash_dump(blob: bytes) -> dict[str, Any]:
             continue
         try:
             if header["payload_type"] == PAYLOAD_FLIGHT_DATA:
-                if len(payload) != FLIGHT_DATA_SIZE:
+                expected_size = FLIGHT_DATA_SIZE_V2 if header["payload_version"] >= 2 else FLIGHT_DATA_SIZE_V1
+                if len(payload) != expected_size:
                     warnings.append(f"flight_data size mismatch at 0x{offset:06x}: {len(payload)}")
                 flight.append(
                     {**record, **parse_flight_data(payload, header["payload_version"])}

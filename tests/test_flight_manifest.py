@@ -29,10 +29,11 @@ def test_manifest_migrates_boot_logging_to_flight_window() -> None:
     values["schema_version"] = 1
     values["logging"]["mode"] = "continuous_from_boot"
     values["logging"].pop("minimum_flight_ms")
+    values.pop("detection")
 
     migrated = FlightManifest.from_dict(values)
 
-    assert migrated.schema_version == 2
+    assert migrated.schema_version == 3
     assert migrated.logging.mode == "flight_window"
     assert migrated.logging.minimum_flight_ms == 1_200_000
 

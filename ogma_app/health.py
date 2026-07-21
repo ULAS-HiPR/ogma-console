@@ -81,6 +81,23 @@ def _croi_health(status: dict[str, Any]) -> tuple[HealthCheck, ...]:
                 "samples produced before logger recovery completed",
             )
         )
+    if "phase_detector_mode" in status:
+        mode = _int(status, "phase_detector_mode")
+        checks.append(
+            HealthCheck(
+                "phase_detector_mode",
+                "ok" if mode == 0 else "warn",
+                f"mode={mode} (0=IMU+barometer)",
+            )
+        )
+        sensor_mask = _int(status, "phase_sensor_health_mask")
+        checks.append(
+            HealthCheck(
+                "phase_sensor_health",
+                "ok" if sensor_mask & 0x03 == 0x03 else "fail",
+                f"mask=0x{sensor_mask:02x}",
+            )
+        )
     for key, detail in (
         ("fsm_stack_free_bytes", "FSM stack headroom"),
         ("can_stack_free_bytes", "CAN stack headroom"),

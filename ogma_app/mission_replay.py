@@ -18,6 +18,9 @@ class ReplaySample:
     acceleration_m_s2: float
     velocity_m_s: float
     altitude_m: float
+    barometric_altitude_m: float | None = None
+    imu_valid: bool = True
+    baro_valid: bool = True
 
 
 @dataclass(frozen=True)
@@ -28,6 +31,13 @@ class ReplayPoint:
     main_backup: bool
     airbrake_active: bool
     airbrake_angle_deg: int
+    candidate_mask: int
+    confirmed_vote_mask: int
+    gate_mask: int
+    rejection_mask: int
+    transition_reason: int
+    detector_mode: int
+    required_votes: int
 
 
 @dataclass(frozen=True)
@@ -68,6 +78,9 @@ def load_replay_csv(path: Path) -> list[ReplaySample]:
                     _number(row, ("acceleration_m_s2", "prediction_acceleration_m_s2", "accel_m_s2")),
                     _number(row, ("velocity_m_s", "prediction_velocity_m_s", "vspeed_m_s")),
                     _number(row, ("altitude_m", "prediction_altitude_m", "kalman_altitude_m")),
+                    _optional_number(row, ("barometric_altitude_m", "baro_altitude_m")),
+                    _optional_bool(row, "imu_valid", True),
+                    _optional_bool(row, "baro_valid", True),
                 )
             )
         except (TypeError, ValueError) as exc:
@@ -84,6 +97,7 @@ def run_firmware_replay(manifest: FlightManifest, samples: list[ReplaySample]) -
     executable = _native_replay_executable()
     mission = manifest.mission
     recovery = manifest.recovery
+    detection = manifest.detection
     arguments = (
         str(executable),
         str(mission.liftoff_accel_m_s2),
@@ -101,9 +115,29 @@ def run_firmware_replay(manifest: FlightManifest, samples: list[ReplaySample]) -
         str(mission.airbrake_max_angle_deg),
         str(mission.airbrake_start_delay_ms),
         str(mission.airbrake_stow_delay_ms),
+        str(detection.liftoff_confirm_ms),
+        str(detection.liftoff_baro_velocity_m_s),
+        str(detection.burnout_min_powered_ms),
+        str(detection.burnout_accel_threshold_m_s2),
+        str(detection.burnout_confirm_ms),
+        str(detection.burnout_timeout_ms),
+        str(detection.apogee_min_coast_ms),
+        str(detection.apogee_min_altitude_m),
+        str(detection.apogee_velocity_threshold_m_s),
+        str(detection.apogee_confirm_ms),
+        str(detection.apogee_single_sensor_confirm_ms),
+        str(detection.apogee_baro_descent_m),
+        str(detection.apogee_high_speed_lockout_m_s),
+        str(detection.apogee_timeout_ms),
+        str(detection.sensor_fault_timeout_ms),
     )
     payload = "".join(
-        f"{sample.time_ms},{sample.acceleration_m_s2},{sample.velocity_m_s},{sample.altitude_m}\n"
+        (
+            f"{sample.time_ms},{sample.acceleration_m_s2},{sample.velocity_m_s},"
+            f"{sample.altitude_m},"
+            f"{sample.altitude_m if sample.barometric_altitude_m is None else sample.barometric_altitude_m},"
+            f"{int(sample.imu_valid)},{int(sample.baro_valid)}\n"
+        )
         for sample in samples
     )
     completed = subprocess.run(
@@ -125,6 +159,13 @@ def run_firmware_replay(manifest: FlightManifest, samples: list[ReplaySample]) -
             main_backup=bool(int(row["main_backup"])),
             airbrake_active=bool(int(row["airbrake_active"])),
             airbrake_angle_deg=int(row["airbrake_angle_deg"]),
+            candidate_mask=int(row["candidate_mask"]),
+            confirmed_vote_mask=int(row["confirmed_vote_mask"]),
+            gate_mask=int(row["gate_mask"]),
+            rejection_mask=int(row["rejection_mask"]),
+            transition_reason=int(row["transition_reason"]),
+            detector_mode=int(row["detector_mode"]),
+            required_votes=int(row["required_votes"]),
         )
         for row in rows
     )
@@ -143,7 +184,7 @@ def synthetic_nominal_profile() -> list[ReplaySample]:
             acceleration, velocity, altitude = 35.0, elapsed * 35.0, elapsed * elapsed * 17.5
         elif time_ms < 12000:
             elapsed = (time_ms - 4000) / 1000.0
-            acceleration = -9.0
+            acceleration = -14.0
             velocity = 105.0 - elapsed * 14.0
             altitude = 157.5 + 105.0 * elapsed - 7.0 * elapsed * elapsed
         elif time_ms < 22000:
@@ -158,10 +199,14 @@ def synthetic_nominal_profile() -> list[ReplaySample]:
 def _native_replay_executable() -> Path:
     source = Path(__file__).with_name("native") / "flight_replay.cpp"
     phase_header = OGMA_ROOT / "croi" / "firmware" / "src" / "tools" / "flight_phase_logic.h"
+    diagnostics_header = OGMA_ROOT / "croi" / "firmware" / "src" / "tools" / "flight_phase_diagnostics.h"
     airbrake_header = OGMA_ROOT / "croi" / "firmware" / "src" / "tools" / "airbrake_logic.h"
     data_header = OGMA_ROOT / "croi" / "firmware" / "lib" / "comheadan" / "include" / "data.h"
     digest = hashlib.sha256(
-        b"".join(path.read_bytes() for path in (source, phase_header, airbrake_header, data_header))
+        b"".join(
+            path.read_bytes()
+            for path in (source, phase_header, diagnostics_header, airbrake_header, data_header)
+        )
     ).hexdigest()[:16]
     executable = Path(tempfile.gettempdir()) / f"ogma-flight-replay-{digest}"
     if executable.exists():
@@ -189,3 +234,23 @@ def _number(row: dict[str, str | None], names: tuple[str, ...]) -> float:
         if value not in (None, ""):
             return float(value)
     raise ValueError(f"missing one of: {', '.join(names)}")
+
+
+def _optional_number(row: dict[str, str | None], names: tuple[str, ...]) -> float | None:
+    for name in names:
+        value = row.get(name)
+        if value not in (None, ""):
+            return float(value)
+    return None
+
+
+def _optional_bool(row: dict[str, str | None], name: str, default: bool) -> bool:
+    value = row.get(name)
+    if value in (None, ""):
+        return default
+    normalized = str(value).strip().lower()
+    if normalized in ("1", "true", "yes", "valid"):
+        return True
+    if normalized in ("0", "false", "no", "invalid"):
+        return False
+    raise ValueError(f"{name} must be true/false or 1/0")

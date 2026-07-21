@@ -8,11 +8,17 @@ from pathlib import Path
 from typing import Any
 
 from .lamh_config import LamhSafetyConfig
-from .mission_config import LoggingPolicy, MissionConfig, RecoveryFallbackConfig, load_mission_json
+from .mission_config import (
+    LoggingPolicy,
+    MissionConfig,
+    PhaseDetectionConfig,
+    RecoveryFallbackConfig,
+    load_mission_json,
+)
 
 
 FLIGHT_MANIFEST_FORMAT = "ogma-flight-manifest"
-FLIGHT_MANIFEST_SCHEMA_VERSION = 2
+FLIGHT_MANIFEST_SCHEMA_VERSION = 3
 KNOWN_FLIGHT_BOARDS = frozenset(("croi", "teachtaire", "lamh", "foinse", "pleasc"))
 
 
@@ -64,6 +70,7 @@ class PreflightPolicy:
 class FlightManifest:
     mission: MissionConfig
     lamh_safety: LamhSafetyConfig
+    detection: PhaseDetectionConfig = PhaseDetectionConfig()
     recovery: RecoveryFallbackConfig = RecoveryFallbackConfig()
     logging: LoggingPolicy = LoggingPolicy()
     radio: RadioPolicy = RadioPolicy()
@@ -83,10 +90,12 @@ class FlightManifest:
         if schema_version == 1:
             logging_values["mode"] = "flight_window"
             logging_values.setdefault("minimum_flight_ms", 1_200_000)
+        if schema_version in (1, 2):
             schema_version = FLIGHT_MANIFEST_SCHEMA_VERSION
         manifest = cls(
             mission=mission,
             lamh_safety=LamhSafetyConfig.from_values(lamh_values.get("angles_deg", ())),
+            detection=PhaseDetectionConfig(**dict(values.get("detection", {}))),
             recovery=RecoveryFallbackConfig(**_required_dict(values, "recovery")),
             logging=LoggingPolicy(**logging_values),
             radio=RadioPolicy(**_required_dict(values, "radio")),
@@ -105,6 +114,7 @@ class FlightManifest:
         if self.schema_version != FLIGHT_MANIFEST_SCHEMA_VERSION:
             raise ValueError("unsupported flight manifest schema")
         self.mission.validate()
+        self.detection.validate()
         LamhSafetyConfig.from_values(self.lamh_safety.angles_deg)
         self.recovery.validate(self.mission)
         self.logging.validate()
@@ -128,6 +138,7 @@ class FlightManifest:
             "schema_version": self.schema_version,
             "mission": self.mission.canonical_dict(),
             "lamh_safety": {"angles_deg": list(self.lamh_safety.angles_deg)},
+            "detection": asdict(self.detection),
             "recovery": asdict(self.recovery),
             "logging": asdict(self.logging),
             "radio": asdict(self.radio),
@@ -168,7 +179,7 @@ def load_flight_manifest(path: Path, lamh_safety: LamhSafetyConfig | None = None
             lamh_safety=lamh_safety or LamhSafetyConfig.defaults(),
         )
     file_schema = int(payload.get("schema_version", 0))
-    if file_schema not in (1, FLIGHT_MANIFEST_SCHEMA_VERSION):
+    if file_schema not in (1, 2, FLIGHT_MANIFEST_SCHEMA_VERSION):
         raise ValueError("unsupported flight manifest file schema")
     values = payload.get("manifest")
     if not isinstance(values, dict):

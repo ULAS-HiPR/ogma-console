@@ -15,6 +15,7 @@ from .lamh_config import (
 from .mission_config import (
     LoggingPolicy,
     MissionConfig,
+    PhaseDetectionConfig,
     RecoveryFallbackConfig,
     save_mission_flash_record,
     write_croi_mission_header,
@@ -84,6 +85,7 @@ class LamhSafetyFlashResult:
 @dataclass(frozen=True)
 class CroiMissionFlashResult:
     config: MissionConfig
+    detection: PhaseDetectionConfig
     recovery: RecoveryFallbackConfig
     logging: LoggingPolicy
     env: str
@@ -505,9 +507,11 @@ class OgmaController:
         env: str | None = None,
         recovery: RecoveryFallbackConfig | None = None,
         logging: LoggingPolicy | None = None,
+        phase_detection: PhaseDetectionConfig | None = None,
     ) -> CroiMissionFlashResult:
         recovery = recovery or RecoveryFallbackConfig()
         logging = logging or LoggingPolicy()
+        phase_detection = phase_detection or PhaseDetectionConfig()
         profile = profile_for("croi")
         if profile.firmware_dir is None or profile.default_env is None:
             raise RuntimeError("croi flight firmware is unavailable")
@@ -528,8 +532,11 @@ class OgmaController:
             config,
             recovery,
             logging,
+            phase_detection,
         )
-        self.log(f"croi mission config saved: crc=0x{config.crc32(recovery, logging):08x}")
+        self.log(
+            f"croi mission config saved: crc=0x{config.crc32(recovery, logging, phase_detection):08x}"
+        )
 
         stage = "build"
         try:
@@ -547,7 +554,7 @@ class OgmaController:
                 self.log("croi mission image flashed; SWD readback did not complete")
             raise
 
-        verification = verify_croi_mission(config, status, recovery, logging)
+        verification = verify_croi_mission(config, status, recovery, logging, phase_detection)
         verification.require_ok()
 
         record_path = save_mission_flash_record(
@@ -558,10 +565,19 @@ class OgmaController:
             status,
             recovery,
             logging,
+            phase_detection,
         )
         self.log(f"croi mission config verified; audit record: {record_path}")
         return CroiMissionFlashResult(
-            config, recovery, logging, selected_env, header_path, record_path, status, verification
+            config,
+            phase_detection,
+            recovery,
+            logging,
+            selected_env,
+            header_path,
+            record_path,
+            status,
+            verification,
         )
 
     def flash_teachtaire_radio_config(

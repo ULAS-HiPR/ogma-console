@@ -94,3 +94,44 @@ Ogma is materially integrated, but this checkpoint is not flight clearance. Veri
 4. Run outdoor GNSS and controlled radio range/loss tests.
 5. Assemble Pleasc and complete inert-load arm/fire/fault HIL before any energetic testing.
 6. Run nominal and adversarial flight replays, then a full-stack dress rehearsal with archived evidence.
+
+## 2026-07-16 - Fault-aware flight-phase detector implemented
+
+**Type:** decision and software checkpoint
+
+**Context**
+
+The previous Croi state machine used three consecutive samples for liftoff, burnout, and apogee, and stopped advancing whenever either primary sensor missed a read. That was simple but had no minimum burn/coast guards, no high-speed pressure lockout, no sensor-degraded path, and insufficient evidence explaining why a transition did or did not happen.
+
+**Progress / decision**
+
+- Croi now uses time-persistent phase evidence with minimum powered/coast gates, minimum apogee altitude, a high-speed lockout, bounded burnout/apogee timeouts, and explicit runtime sensor-health modes.
+- Nominal apogee requires two confirmed votes from fused velocity, barometric descent from peak, and independently integrated inertial velocity. A persistent single-sensor fault enables a longer one-sensor fallback. Total sensor loss can use the apogee timeout only if minimum altitude was recorded first.
+- Mission schema 7 includes every detector parameter in the manifest hash, generated header, and Croi CRC. Baseline CRC is `0x11B80BC5`; airbrakes, pyros, and main fallback remain disabled in the checked-in baseline.
+- Croi status version 13 and flash flight payload version 2 expose the detector's evidence, gates, rejections, mode, sensor health, estimates, and transition reason. Legacy flash records remain readable.
+- Defaults are a development baseline. They are not accepted motor-specific flight values.
+
+**Evidence**
+
+- Croi native SIL: 21/21 tests passed, including persistence, wrong-direction shock, main guards, minimum burn time, high-speed false-apogee rejection, barometer-only fallback, and altitude-gated timeout.
+- STM32F072 release build succeeded at 56,660 B flash of 65,536 B and 12,600 B RAM of 16,384 B by PlatformIO size reporting.
+- Ogma Console tests cover nominal replay, transient false crossings, IMU-only, barometer-only, and no-sensor fallback, schema migration, readback, preflight, and both flash payload versions.
+- Detailed behavior: [Croi flight-phase detection](flight-phase-detection.md).
+
+**Consequences**
+
+The detector can now be configured and challenged without maintaining a second implementation in Python. Every desktop replay runs the same header-only C++ logic built into Croi. HIL must verify timing, sensor-fault behavior, and logged evidence before this change can support release.
+
+**Open risks / uncertainty**
+
+- The fused and barometric apogee votes share pressure information and are not fully independent.
+- No attitude/tilt vote exists yet.
+- Losing all altitude evidence before the minimum-altitude latch prevents timeout deployment.
+- The baseline thresholds have not been fitted to a selected motor, vehicle mass, vibration spectrum, or expected trajectory.
+
+**Next checkpoints**
+
+1. Replay recorded or simulated motor/trajectory data and choose reviewed mission values.
+2. Run Croi hardware replay for nominal, false-apogee, high-speed pressure transient, and each sensor-fault mode; compare status and recovered flash evidence with replay.
+3. Repeat with Pleasc inert loads and prove one commanded event per transition.
+4. Review the all-sensors-lost altitude-gate tradeoff before flight configuration is frozen.
