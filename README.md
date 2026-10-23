@@ -1,3 +1,7 @@
+> [!WARNING]
+> This project is archived, and is no longer actively supported.
+> Contact us for more details.
+
 # Ogma Console
 
 Ogma Console is the desktop interface for Ogma, the modular flight-computer stack developed by ULAS HiPR. It gives the team one place to identify, configure, build, flash, inspect, and test every board in the stack, then switches roles to become a live ground telemetry console when connected to the Ogma groundstation.
@@ -220,7 +224,3 @@ The package includes the native replay source, CAN frame contract, payload layou
 - [Groundstation](https://github.com/ULAS-HiPR/gs_receiver)
 - [Comheadan](https://github.com/ULAS-HiPR/comheadan)
 - [Braiteoiri](https://github.com/ULAS-HiPR/braiteoiri)
-
-> [!WARNING]
-> This project is archived, and is no longer actively supported.
-> Contact us for more details.
