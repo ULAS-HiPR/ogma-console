@@ -220,3 +220,7 @@ The package includes the native replay source, CAN frame contract, payload layou
 - [Groundstation](https://github.com/ULAS-HiPR/gs_receiver)
 - [Comheadan](https://github.com/ULAS-HiPR/comheadan)
 - [Braiteoiri](https://github.com/ULAS-HiPR/braiteoiri)
+
+> [!WARNING]
+> This project is archived, and is no longer actively supported.
+> Contact us for more details.
